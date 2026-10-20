@@ -14,6 +14,8 @@
 
 ### teamai.yaml（远端团队配置）
 
+本 fork 在 `provider: git` 下也接受可选配置 `gerrit: { targetBranch: main, wip: true }`，用于评审上传并关闭自动 orphan 分支发布。详见 [Gerrit 配置与边界](providers.md#gerrit-评审上传本-fork)。
+
 ```yaml
 team: my-team
 description: 团队 AI 资源仓库

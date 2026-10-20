@@ -391,11 +391,25 @@ const TeamScriptSchema = z.object({
   path: z.string().min(1),
 });
 
+/** A short branch name, without Gerrit's push-option syntax. */
+export const GerritConfigSchema = z.object({
+  targetBranch: z.string().min(1).refine((branch) => (
+    !branch.startsWith('-') && !branch.startsWith('refs/') && branch !== '@'
+    // oxlint-disable-next-line no-control-regex
+    && !/[\x00-\x20\x7f~^:?*[\\%,]/.test(branch)
+    && !branch.includes('..') && !branch.includes('@{') && !branch.endsWith('.')
+    && branch.split('/').every((part) => part.length > 0 && !part.startsWith('.') && !part.endsWith('.lock'))
+  ), 'Use a short Git branch name without refs/ or push options'),
+  wip: z.boolean().default(true),
+});
+
 export const TeamaiConfigBaseSchema = z.object({
   team: z.string(),
   description: z.string().default(''),
   repo: z.string(),
   provider: ProviderNameSchema.default('tgit'),
+  /** Opt-in review uploads for a separate Git team repo. Never submits changes. */
+  gerrit: GerritConfigSchema.optional(),
   /**
    * @deprecated Ignored by `teamai init` (issue #250). Local install scope is
    * decided only by CLI `--scope` / default. Kept optional for old teamai.yaml files.
@@ -959,6 +973,16 @@ export const PendingPushSchema = z.object({
    */
   base: z.string().optional(),
   items: z.array(PendingPushItemSchema).default([]),
+  /** Durable before upload, so rejected or interrupted uploads reuse their Change-Id. */
+  gerrit: z.object({
+    changeId: z.string().regex(/^I[0-9a-f]{40}$/),
+    targetBranch: z.string(),
+    commit: z.string().regex(/^[0-9a-f]{40,64}$/),
+    accepted: z.boolean(),
+    /** Hash of the normalized actual push URL; missing old records cannot be reused. */
+    destination: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    includesTeamConfig: z.boolean().default(false),
+  }).optional(),
 });
 
 export type PendingPushItem = z.infer<typeof PendingPushItemSchema>;

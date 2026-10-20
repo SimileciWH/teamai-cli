@@ -54,6 +54,7 @@ vi.mock('../utils/git.js', () => ({
     stash: vi.fn(),
     reset: vi.fn(),
     clean: vi.fn(),
+    raw: vi.fn().mockResolvedValue(''),
   }),
   pullRepo: (...args: unknown[]) => mockPullRepo(...args),
   pushRepoBranch: (...args: unknown[]) => mockPushRepoBranch(...args),
@@ -317,6 +318,25 @@ describe('push() with an open PR', () => {
       scanLocalForPush: vi.fn().mockResolvedValue(type === 'skills' ? [makeItem()] : []),
       pushItem: vi.fn(),
     }));
+  });
+
+  it('returns to ordinary Git after refresh removes Gerrit with no local config edit', async () => {
+    const gerrit = await import('../utils/gerrit.js');
+    const effective = vi.spyOn(gerrit, 'readEffectiveGerritConfig')
+      .mockResolvedValueOnce({ targetBranch: 'main', wip: true })
+      .mockResolvedValueOnce(undefined);
+    mockAutoDetectInit.mockResolvedValue({
+      localConfig: { ...makeLocalConfig(), repo: { ...makeLocalConfig().repo, kind: 'git' } },
+      teamConfig: { ...makeTeamConfig(), provider: 'git', gerrit: { targetBranch: 'main', wip: true } },
+    });
+    mockLoadStateForScope.mockResolvedValue(makeState());
+    try {
+      await push({ all: true, message: 'Publish a skill' });
+      expect(mockPushRepoBranch).toHaveBeenCalledTimes(1);
+      expect(mockCreatePullRequest).toHaveBeenCalledTimes(1);
+    } finally {
+      effective.mockRestore();
+    }
   });
 
   it('updates the open PR instead of opening a second one', async () => {

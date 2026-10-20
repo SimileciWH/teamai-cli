@@ -66,6 +66,37 @@ teamai init https://dev.azure.com/org/project/_git/repo
 - HTTPS：预先配置 Git Credential Helper；不要把用户名、密码或 Token 写进 URL。
 - SSH：预先配置 SSH Key，并确保 `ssh-agent` 能访问私钥。
 
+### Gerrit 评审上传（本 fork）
+
+本 fork 为 `init`、`pull`、`push` 增加显式启用的 Gerrit 路径。请使用团队验收过的 fork 构建；原版可能忽略 `gerrit` 字段，继续推送普通分支。团队配置保持 `autoUpdate: false`，本机配置设置 `updatePolicy: skip`，避免自动升级覆盖 fork。
+
+成员初始化前，先把以下配置合入远端默认分支：
+
+```yaml
+provider: git
+autoUpdate: false
+usageReport: false
+gerrit:
+  targetBranch: main
+  wip: true
+```
+
+仅支持独立 Git 团队仓库。`targetBranch` 使用短分支名，且必须等于远端默认分支；不支持 self 模式、HTTP 仓库和 `push --branch`。认证沿用现有 SSH 或 HTTPS 凭据，无需 Gerrit API token。
+
+```bash
+teamai init https://gerrit.example.com/team/resources --provider git
+teamai pull
+teamai push --all --message "Improve review guidance"
+```
+
+必须用 `--message` 提供单行提交标题。Push 生成带有效 `Change-Id` 的提交，直接上传到 `refs/for/main%wip`（`wip` 默认 true；false 时省略 `%wip`）。不会创建普通远端分支、调用 PR API 或执行 Submit；服务端返回评审 URL 时会打印它。协议依据 Gerrit 的[评审上传](https://gerrit-review.googlesource.com/Documentation/user-upload.html)和 [Change-Id](https://gerrit-review.googlesource.com/Documentation/user-changeid.html) 文档。
+
+上传前先保存本机评审状态。重复贡献复用 Change-Id；内容不变的重试复用原提交。更新已有评审时须选中其中全部资源，并保留原目标位置；该评审携带的配置修改也会保留。`teamai.yaml` 也可单独上传。评审解决前请保留本机状态和待发 Git 提交；适配器不查找其他机器创建的评审。拒绝或中断始终算失败，包括 `no new changes`；结果不明确时先在 Gerrit 核实，再处理本机待发状态。已放弃等关闭评审需要人工核对。只有目标分支历史出现对应 Change-Id，才清理记录。
+
+待发评审绑定实际 `origin` push URL 的哈希。切换推送目标、复用同一 scope 接入其他仓库或配置多个 push URL 时，会停止上传，须先核对原评审状态。Fetch 与 push URL 可以不同。仅在工作副本删除 `gerrit` 不会解除已提交配置的保护；须让删除操作经过评审，并拉取合入后的默认分支。
+
+Gerrit 模式跳过成员注册，并拒绝自动发布 `teamai-reports`、`teamai-learnings`，即使其他设置开启使用上报也一样。本机 pending 数据保留，不代表已送达。只读拉取仍可分发已合入默认分支的资源；未合入的 Gerrit patch set 不属于 `pull --team-ref` 分发目标。
+
 ## GitHub Provider
 
 ### 认证

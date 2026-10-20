@@ -17,6 +17,8 @@ node --version      # must be >= 20
 teamai --version    # install once with: npm install -g teamai-cli
 ```
 
+For a team using this fork's `gerrit` configuration, use its verified fork build instead of installing or upgrading to upstream. Upstream may ignore that configuration. Follow `docs/guide/providers.md` in the fork for the supported setup and update-policy boundary.
+
 Then pick the flow. A user **setting up a new team** becomes its admin and creates
 the repo; a user **joining an existing team** needs a repo URL from their admin. A
 would-be member without a URL is still the **join** flow — `join-member.md` tells

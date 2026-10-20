@@ -19,6 +19,8 @@ usageReportEnabled: false
 
 `teamai doctor` 会说明当前开没开、设置来自哪里。
 
+启用本 fork 的 [Gerrit 模式](providers.md#gerrit-评审上传本-fork) 后，无论上述偏好如何设置，都禁止自动发布 reports 和 learnings 分支；Init 也不发布成员注册。本机 pending 数据保留在本地；诊断显示上报偏好已开启，不代表 Gerrit 已接收。
+
 看团队这一周：
 
 ```bash

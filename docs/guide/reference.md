@@ -14,6 +14,8 @@ The full list is in [`skill-data/core/references/commands.md`](../../skill-data/
 
 ### teamai.yaml (remote team config)
 
+This fork also accepts the optional `gerrit: { targetBranch: main, wip: true }` block with `provider: git`. It changes review uploads and disables automatic orphan-branch publication. See [Gerrit boundaries and setup](providers.md#gerrit-review-uploads-this-fork).
+
 ```yaml
 team: my-team
 description: Team AI resource repo

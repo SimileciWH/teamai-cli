@@ -15,6 +15,12 @@ thing now.
 
 ## Which kind of contribution?
 
+For this fork's opt-in Gerrit teams, read `teamai push --help` before uploading:
+the supported path creates or updates a Gerrit review, which teammates receive
+only after it is merged. Automatic learning publication is disabled; keep the
+local draft and report it as undelivered. Do not use the ordinary branch/PR
+fallback below for a Gerrit team.
+
 - **A learning** (a lesson, a gotcha, how you solved something) → this is
   **automatic** once recall is on (off by default) and the teamai config loads: TeamAI prompts at the end of a session worth sharing and the
   dedicated `share` workflow (`teamai skill get share`) takes over (it summarizes the

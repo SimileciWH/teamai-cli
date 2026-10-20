@@ -32,6 +32,7 @@ import { createGit, createGitForInitPush, isGitRepo, commitSkippingHooks, isDedi
 import { acquireLock, releaseLock } from '../update.js';
 import { ensureDir, writeFile, pathExists } from './fs.js';
 import { isSilent, log } from './logger.js';
+import { GERRIT_REPORTS_DISABLED, readEffectiveGerritConfig } from './gerrit.js';
 import {
   WORKTREE_DIRNAMES,
   getBusinessRoot,
@@ -194,6 +195,11 @@ async function openWorktree(
 ): Promise<{ wt: string; current: boolean }> {
   if (!usesBranchWorktree(localConfig)) {
     return { wt: getWorktreeDir(localConfig, spec.worktreeDirname), current: false };
+  }
+  // Readers may materialize a local view, but Gerrit has no automatic orphan
+  // branch publication. Writers are refused before their callback can run.
+  if (await readEffectiveGerritConfig(localConfig.repo.localPath)) {
+    options = { ...options, pushIfCreated: false };
   }
 
   const wt = worktreePath(spec, localConfig);
@@ -699,6 +705,9 @@ async function commitAndPushImpl(
   }
 
   try {
+    if (await readEffectiveGerritConfig(localConfig.repo.localPath)) {
+      return { status: 'failed', reason: GERRIT_REPORTS_DISABLED, refused: true };
+    }
     const wt = await ensureWorktree(spec, localConfig, { initPush: options.initPush });
     return await commitAndPushAt(spec, wt, message, files, options);
   } catch (e) {
@@ -750,6 +759,9 @@ async function updateImpl(
   }
 
   try {
+    if (await readEffectiveGerritConfig(localConfig.repo.localPath)) {
+      return { status: 'failed', reason: GERRIT_REPORTS_DISABLED, refused: true };
+    }
     const { wt, current } = await openWorktree(spec, localConfig, options);
     try {
       if (!current) await syncWorktree(spec, wt, options.initPush);

@@ -19,6 +19,8 @@ usageReportEnabled: false
 
 `teamai doctor` says whether reporting is on and where that comes from.
 
+With this fork's [Gerrit mode](providers.md#gerrit-review-uploads-this-fork), automatic reports and learnings branch publication is disabled regardless of these reporting preferences. Init does not publish member registration. Local pending data stays local; a reporting preference shown as on does not mean Gerrit received it.
+
 See the team's week:
 
 ```bash

@@ -35,6 +35,9 @@ import {
 import { askQuestion, askSelection, isInteractive } from './utils/prompt.js';
 import { pathExists, pruneEmptyDirs, readFileSafe, writeFile } from './utils/fs.js';
 import { brokenTeamProfileFiles } from './models/profile.js';
+import { assertGerritPendingDestination, assertGerritPush, pushGerritReview, readEffectiveGerritConfig } from './utils/gerrit.js';
+
+type PushOptions = GlobalOptions & { all?: boolean; role?: string; project?: string; branch?: string; message?: string };
 
 /**
  * Filter a list of repo-root-relative paths (e.g. "rules/", ".codebuddy-plugin/") down to
@@ -683,6 +686,7 @@ async function pushGroup(args: {
   pushState: State;
   includeTeamConfig: boolean;
   branch?: string;
+  message?: string;
 }): Promise<PushGroupOutcome> {
   const { group, teamConfig, localConfig, pushState, includeTeamConfig, branch } = args;
   const { items, reuse } = group;
@@ -734,9 +738,15 @@ async function pushGroup(args: {
     );
     // Include teamai.yaml when the user edited it (e.g. `teamai source add`), so
     // sources / publicSkills changes ride along in the same PR as the resources.
-    const configFiles = includeTeamConfig ? ['teamai.yaml'] : [];
+    const includesTeamConfig = includeTeamConfig || Boolean(teamConfig.gerrit && reuse?.gerrit?.includesTeamConfig);
+    if (teamConfig.gerrit && reuse?.gerrit?.includesTeamConfig && !includeTeamConfig) {
+      const previousConfig = await getFileContentAtRev(localConfig.repo.localPath, reuse.gerrit.commit, 'teamai.yaml');
+      if (previousConfig === null) throw new Error('The pending Gerrit review config is unavailable; restore its local commit before retrying.');
+      await writeFile(path.join(localConfig.repo.localPath, 'teamai.yaml'), previousConfig);
+    }
+    const configFiles = includesTeamConfig ? ['teamai.yaml'] : [];
     const gitFiles = [...new Set([...pushedFiles, ...existingSweepers, ...configFiles])];
-    const commitMsg = `[teamai] Push ${items.length} resource(s) from ${localConfig.username}`;
+    const commitMsg = args.message ?? `[teamai] Push ${items.length} resource(s) from ${localConfig.username}`;
     // Two independent reads. `base` is the default-branch commit the branch is
     // built on, which bounds the history that can prove a placement landed
     // (`reconcilePlacementRecords`).
@@ -745,6 +755,30 @@ async function pushGroup(args: {
       getHeadCommit(localConfig.repo.localPath),
     ]);
     const base = headCommit ?? undefined;
+
+    if (teamConfig.gerrit) {
+      const uploaded = await pushGerritReview({
+        repoPath: localConfig.repo.localPath,
+        config: teamConfig.gerrit,
+        message: commitMsg,
+        files: gitFiles,
+        branch: branchName,
+        reuse,
+        includesTeamConfig,
+        items: () => toPendingItems(items, localConfig.repo.localPath),
+        persist: async (entry) => {
+          recordPendingPush(pushState, entry);
+          await saveStateForScope(pushState, localConfig);
+        },
+      });
+      workingTreeDirtied = false;
+      await checkoutMaster(localConfig.repo.localPath);
+      for (const rel of pushedFiles) await pruneEmptyDirs(path.resolve(localConfig.repo.localPath, rel));
+      pushSpin.succeed(uploaded.uploaded
+        ? `Uploaded Gerrit review: ${uploaded.entry?.prUrl ?? `refs/for/${teamConfig.gerrit.targetBranch}`} (${uploaded.entry?.gerrit?.changeId})`
+        : 'No changes to push (Gerrit review already up to date)');
+      return uploaded.uploaded ? 'pushed' : 'nochange';
+    }
 
     const hasChanges = await pushRepoBranch(
       localConfig.repo.localPath,
@@ -850,6 +884,10 @@ async function pushGroup(args: {
         );
       }
     }
+    if (teamConfig.gerrit) {
+      try { await checkoutMaster(localConfig.repo.localPath); } catch { /* Keep the pending commit reachable. */ }
+      log.warn('The Gerrit upload was not confirmed. Pending review state is retained; retry with the same resources and --message.');
+    }
     return 'failed';
   }
 }
@@ -877,7 +915,7 @@ async function validateWorkflows(localConfig: LocalConfig, dryRun: boolean): Pro
 }
 
 export async function push(
-  options: GlobalOptions & { all?: boolean; role?: string; project?: string; branch?: string },
+  options: PushOptions,
   /**
    * Optional out-param: set to `{ completed: true }` only when a real push
    * actually happened (resources or config pushed) — never on dry-run, cancel,
@@ -890,7 +928,8 @@ export async function push(
   // An unreadable project config stops here instead of selecting another team.
   // A workspace sends an edit back where it came from, a child's namespace
   // included; a new item still goes to its own selection (#913).
-  const { localConfig, teamConfig } = await autoDetectInit(undefined, { dryRun: options.dryRun });
+  const { localConfig, teamConfig: loadedTeamConfig } = await autoDetectInit(undefined, { dryRun: options.dryRun });
+  let teamConfig = loadedTeamConfig;
   if (localConfig.scope === 'project' && localConfig.repo.ref !== undefined) {
     const ref = localConfig.repo.ref;
     log.error(`This workspace is pinned to team ref "${ref}", so its skill, rule and agent changes were not pushed: they were made on top of "${ref}". Commit them to "${ref}" in the team repo, or make them again in a workspace that follows the default branch.`);
@@ -898,6 +937,15 @@ export async function push(
     return;
   }
   assertNotReadOnly(localConfig, 'teamai push');
+  try {
+    const effectiveGerrit = await readEffectiveGerritConfig(localConfig.repo.localPath);
+    if (effectiveGerrit) teamConfig = { ...teamConfig, gerrit: effectiveGerrit };
+    await assertGerritPush(localConfig, teamConfig, options);
+  } catch (e) {
+    log.error((e as Error).message);
+    process.exitCode = 1;
+    return;
+  }
 
   // --project is a destination override expressed as a logical project. Each
   // resource type then resolves from its OWN axis in manifest/projects.yaml —
@@ -1040,7 +1088,7 @@ async function pendingSelfTeamConfig(localConfig: LocalConfig): Promise<string |
 async function pushCore(
   localConfig: LocalConfig,
   teamConfig: TeamaiConfig,
-  options: GlobalOptions & { all?: boolean; role?: string; project?: string; branch?: string },
+  options: PushOptions,
   initialPendingTeamConfig: string | null = null,
   result?: { completed: boolean },
 ): Promise<void> {
@@ -1090,6 +1138,7 @@ async function pushCore(
   // Set when the pull below failed: everything read from the clone after this
   // point is the previous pull's, manifests included.
   let teamRepoStale = false;
+  const gerritBeforeRefresh = teamConfig.gerrit;
   if (!selfMode) {
     const pullSpin = (await spinner('Pulling latest changes...')).start();
     try {
@@ -1162,13 +1211,11 @@ async function pushCore(
         await resetToCleanMaster(git, repoPath);
         await pullRepo(repoPath);
       } finally {
-        // Unlike teamai.yaml, nothing later in the run holds these edits, so
-        // they go back even when the refresh fails after reset --hard.
+        // Restore both snapshots even when refresh fails after reset --hard.
         lostEnvFiles = await restorePendingEnvFiles();
-      }
-      if (pendingTeamConfig !== null) {
-        // Re-apply the TeamAI-owned config edit after refreshing the default branch.
-        await writeFile(yamlPath, pendingTeamConfig);
+        if (pendingTeamConfig !== null) {
+          await writeFile(yamlPath, pendingTeamConfig);
+        }
       }
       pullSpin.succeed('Up to date');
     } catch (e) {
@@ -1177,6 +1224,20 @@ async function pushCore(
     }
     if (lostEnvFiles.length > 0) {
       reportLostEnvFiles(lostEnvFiles);
+      return;
+    }
+    try {
+      // A successful read with no block is meaningful: the team may have
+      // merged its removal. Local additions and uncommitted deletions still
+      // use the same effective-mode rule as every orphan-branch writer.
+      teamConfig = { ...teamConfig, gerrit: await readEffectiveGerritConfig(localConfig.repo.localPath) };
+      if (teamRepoStale && (gerritBeforeRefresh || teamConfig.gerrit)) {
+        throw new Error('Gerrit push stopped because the default branch could not be refreshed. Local edits are retained.');
+      }
+      await assertGerritPush(localConfig, teamConfig, options);
+    } catch (error) {
+      log.error((error as Error).message);
+      process.exitCode = 1;
       return;
     }
   }
@@ -1408,6 +1469,13 @@ async function pushCore(
   // are dropped first; the scan-presence rule needs the scan and runs after it.
   const pushState = await loadStateForScope(localConfig);
   const recordedPushes = pushState.pendingPushes ?? [];
+  try {
+    await assertGerritPendingDestination(localConfig.repo.localPath, recordedPushes);
+  } catch (error) {
+    log.error((error as Error).message);
+    process.exitCode = 1;
+    return;
+  }
   const openPushes = await dropClosedPendingPushes(localConfig.repo.localPath, recordedPushes);
 
   // The copy `--skill` names. The skills scan leaves its outcome to --skill below.
@@ -1841,7 +1909,7 @@ async function pushCore(
     if (openPrs.length > 0) {
       pendingIndices.add(i);
       for (const entry of openPrs) {
-        console.log(`       awaiting review: ${entry.prUrl ?? `branch ${entry.branch}`}`);
+        console.log(`       awaiting review: ${entry.prUrl ?? (entry.gerrit ? `Gerrit ${entry.gerrit.changeId}` : `branch ${entry.branch}`)}`);
       }
     }
   }
@@ -1849,8 +1917,8 @@ async function pushCore(
 
   if (pendingIndices.size > 0) {
     log.info(
-      `${pendingIndices.size} resource(s) already belong to an open PR. Keeping them selected updates `
-      + 'that PR instead of opening a duplicate; deselect them to leave it untouched.',
+      `${pendingIndices.size} resource(s) already belong to an open ${teamConfig.gerrit ? 'Gerrit review' : 'PR'}. Keeping them selected updates `
+      + `that ${teamConfig.gerrit ? 'review' : 'PR'} instead of opening a duplicate; deselect them to leave it untouched.`,
     );
     console.log('');
   }
@@ -1893,7 +1961,30 @@ async function pushCore(
   // branch, which updates it in place; everything else goes into a new PR. Both
   // can happen in one run, so editing a resource under review updates its PR
   // without dragging unrelated resources into that review.
+  if (teamConfig.gerrit && (
+    partiallySelectedEntries(selectedItems, reusablePending).length > 0
+    || pendingPushes.some((entry) => entry.gerrit && entry.items.some((recorded) => (
+      selectedItems.some((item) => item.type === recorded.type && item.name === recorded.name)
+    )) && !reusablePending.includes(entry))
+  )) {
+    log.error('Gerrit review updates require all of the pending review resources at their recorded destinations. Select them all without changing their namespace.');
+    process.exitCode = 1;
+    return;
+  }
   const groups = planPushGroups(selectedItems, reusablePending);
+  if (groups.some((group) => group.reuse && Boolean(group.reuse.gerrit) !== Boolean(teamConfig.gerrit))) {
+    log.error('A selected resource belongs to a different review mode. Resolve its pending contribution before switching modes.');
+    process.exitCode = 1;
+    return;
+  }
+  const configReview = teamConfig.gerrit && pendingTeamConfig !== null
+    ? pendingPushes.find((entry) => entry.gerrit?.includesTeamConfig)
+    : undefined;
+  if (configReview && !groups.some((group) => group.reuse === configReview)) {
+    log.error('teamai.yaml already belongs to a pending Gerrit review. Update that review with all of its resources before creating another contribution.');
+    process.exitCode = 1;
+    return;
+  }
   const settled = reuseRecordedDestinations(groups);
   // The conflicting entries dropped above are deliberately not reused, so they
   // are not "partly selected" either — warning about them would contradict the
@@ -1918,7 +2009,9 @@ async function pushCore(
   const newGroupIndex = options.branch
     ? groups.findIndex((group) => !group.reuse)
     : -1;
-  const configGroupIndex = pendingTeamConfig === null
+  const configGroupIndex = configReview
+    ? groups.findIndex((group) => group.reuse === configReview)
+    : pendingTeamConfig === null
     ? -1
     : options.branch
       ? (newGroupIndex >= 0 ? newGroupIndex : groups.length)
@@ -1935,6 +2028,7 @@ async function pushCore(
       pushState,
       includeTeamConfig: groupIndex === configGroupIndex,
       branch: options.branch,
+      message: options.message,
     });
     // A failure can leave the clone on the group's local branch, where an
     // unpushed commit holds the config and env edits: go back to the default
@@ -2031,7 +2125,7 @@ async function pushCore(
 async function pushTeamConfigOnly(
   localConfig: LocalConfig,
   teamConfig: TeamaiConfig,
-  options: GlobalOptions & { branch?: string },
+  options: PushOptions,
   result?: { completed: boolean },
 ): Promise<void> {
   console.log('');
@@ -2044,9 +2138,52 @@ async function pushTeamConfigOnly(
     return;
   }
 
+  if (teamConfig.gerrit) {
+    const state = await loadStateForScope(localConfig);
+    const reuse = state.pendingPushes.find((entry) => entry.gerrit?.includesTeamConfig);
+    if (reuse && reuse.items.length > 0) {
+      log.error('teamai.yaml belongs to a pending Gerrit review with resources. Select all of that review\'s resources to update it.');
+      process.exitCode = 1;
+      return;
+    }
+    const content = await readFileSafe(path.join(localConfig.repo.localPath, 'teamai.yaml'));
+    const branch = reuse?.branch ?? await unusedBranchName(localConfig.repo.localPath, localConfig.username);
+    const spin = (await spinner('Uploading team config for Gerrit review...')).start();
+    try {
+      const uploaded = await pushGerritReview({
+        repoPath: localConfig.repo.localPath,
+        config: teamConfig.gerrit,
+        message: options.message!,
+        files: ['teamai.yaml'],
+        branch,
+        reuse,
+        items: async () => [],
+        includesTeamConfig: true,
+        persist: async (entry) => {
+          recordPendingPush(state, entry);
+          await saveStateForScope(state, localConfig);
+        },
+      });
+      await checkoutMaster(localConfig.repo.localPath);
+      spin.succeed(uploaded.uploaded
+        ? `Uploaded Gerrit review: ${uploaded.entry?.prUrl ?? `refs/for/${teamConfig.gerrit.targetBranch}`} (${uploaded.entry?.gerrit?.changeId})`
+        : 'No changes to push (Gerrit review already up to date)');
+      if (result && uploaded.uploaded) result.completed = true;
+    } catch (error) {
+      spin.fail(`Gerrit upload was not confirmed: ${(error as Error).message}`);
+      try {
+        await checkoutMaster(localConfig.repo.localPath);
+      } finally {
+        if (content !== null) await writeFile(path.join(localConfig.repo.localPath, 'teamai.yaml'), content);
+      }
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   const pushSpin = (await spinner('Pushing team config...')).start();
   const branchName = options.branch ?? generateBranchName(localConfig.username);
-  const commitMsg = `[teamai] Update team config from ${localConfig.username}`;
+  const commitMsg = options.message ?? `[teamai] Update team config from ${localConfig.username}`;
 
   try {
     const hasChanges = await pushRepoBranch(

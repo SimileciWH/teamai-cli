@@ -39,6 +39,7 @@ Generated: do not edit by hand. Regenerate with
   - `--role <id>` — Namespace for new skills, rules and agents (skills/<id>/, rules/<id>/, agents/<id>/). Without --role or --project, the namespaces of your role and active projects decide
   - `--project <id>` — Target a project: each new resource goes to that project's namespace for its own type — skills, knowledge for rules, agents (from manifest/projects.yaml)
   - `--branch <name>` — Push to this destination branch instead of a generated teamai/push branch
+  - `--message <subject>` — Commit subject (required for opt-in Gerrit review uploads; one line)
 
 ## pull
 

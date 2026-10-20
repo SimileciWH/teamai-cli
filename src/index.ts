@@ -175,6 +175,7 @@ program
   .option('--project <id>', "Target a project: each new resource goes to that project's namespace for its own type "
     + '— skills, knowledge for rules, agents (from manifest/projects.yaml)')
   .option('--branch <name>', 'Push to this destination branch instead of a generated teamai/push branch')
+  .option('--message <subject>', 'Commit subject (required for opt-in Gerrit review uploads; one line)')
   .action(async (cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;
     const { push } = await import('./push.js');

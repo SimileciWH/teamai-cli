@@ -12,6 +12,7 @@ import { probeSelfHostedGitLab } from './providers/gitlab/probe.js';
 import { ensureDir, writeFile, writeFileAtomic, pathExists, expandHome, readFileSafe, remove } from './utils/fs.js';
 import { queueOwner, sameQueueOwner, setAsideQueueOnModeSwitch } from './utils/pending-learnings.js';
 import { dropAllSearchIndexes } from './utils/search-index.js';
+import { readEffectiveGerritConfig, readGerritConfig } from './utils/gerrit.js';
 
 /**
  * A re-init that changes the install's kind or team repository keeps the data
@@ -1159,6 +1160,9 @@ export async function initSelfRepo(options: GlobalOptions & {
   const businessRepoRoot = cwd;
   const teamaiHome = path.join(businessRepoRoot, '.teamai');
   const localPath = teamaiHome; // knowledge (class B) lives under <repo>/.teamai (localPath convention)
+  if (await readGerritConfig(localPath)) {
+    throw new Error('Gerrit mode requires a separate Git team repo; self mode is unsupported.');
+  }
   // P2 self slimming (issue #374): machine data (class A1 — config/state/env
   // backup/search index/managed-mcp/resource cache) now lands in the per-project
   // partition, NOT the repo, so `.teamai/` keeps only committed team knowledge.
@@ -1434,7 +1438,9 @@ export async function initSelfRepo(options: GlobalOptions & {
   }
 
   // Step 6: register member on the reports orphan branch (never touches main / active tree).
-  if (!options.dryRun) {
+  if (teamConfig.gerrit) {
+    log.info('Gerrit mode: member registration and automatic reports publication are disabled; local setup continues.');
+  } else if (!options.dryRun) {
     try {
       const { updateReports } = await import('./utils/reports-branch.js');
       const { isPublished } = await import('./utils/branch-worktree.js');
@@ -1885,7 +1891,12 @@ export async function init(options: GlobalOptions & {
   // Step 4: Load team config
   // Remote teamai.yaml.scope (if present) is ignored — local install location
   // is decided only by --scope / default (issue #250).
+  // An invalid Gerrit config must not become a normal, directly pushed skeleton.
+  const gerritConfig = await readEffectiveGerritConfig(localPath);
   const teamConfig = await loadTeamConfig(localPath);
+  if (gerritConfig && !teamConfig) {
+    throw new Error('The Gerrit teamai.yaml is invalid. Fix it before initializing; no default config was written.');
+  }
   const createdSkeleton = !teamConfig;
   if (!teamConfig) {
     log.warn('teamai.yaml not found in repo. Creating default config...');
@@ -1995,7 +2006,10 @@ export async function init(options: GlobalOptions & {
   // default branch). The clone's leftover members/ is a read-only inherited
   // root: the merge below absorbs the member's pre-switch file.
   let isNewMember = true;
-  if (!options.dryRun) {
+  if (gerritConfig || teamConfig?.gerrit) {
+    isNewMember = false;
+    log.info('Gerrit mode: member registration and automatic reports publication are disabled; local setup continues.');
+  } else if (!options.dryRun) {
     try {
       const { updateReports } = await import('./utils/reports-branch.js');
       const { isPublished } = await import('./utils/branch-worktree.js');

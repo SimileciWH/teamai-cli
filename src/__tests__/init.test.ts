@@ -1048,6 +1048,24 @@ describe('init', () => {
   });
 
   describe('single-repo mode', () => {
+    it('rejects Gerrit before creating directories, saving config or committing a skeleton', async () => {
+      pathExistsFn = (p: string) => p.endsWith(`${path.sep}.git`) || p.endsWith('/.git');
+      const gerrit = await import('../utils/gerrit.js');
+      const read = vi.spyOn(gerrit, 'readGerritConfig').mockResolvedValue({ targetBranch: 'main', wip: true });
+      const { ensureDir, writeFile } = await import('../utils/fs.js');
+      const { saveLocalConfigForScope } = await import('../config.js');
+      try {
+        await expect(init({ repo: '.' })).rejects.toThrow('self mode is unsupported');
+        expect(ensureDir).not.toHaveBeenCalled();
+        expect(writeFile).not.toHaveBeenCalled();
+        expect(saveLocalConfigForScope).not.toHaveBeenCalled();
+        expect(mockGit.commit).not.toHaveBeenCalled();
+        expect(mockGit.push).not.toHaveBeenCalled();
+      } finally {
+        read.mockRestore();
+      }
+    });
+
     it('accepts an existing HTTP origin without persisting its credentials', async () => {
       pathExistsFn = (p: string) => p.endsWith(`${path.sep}.git`) || p.endsWith('/.git');
       mockGit.raw.mockResolvedValue(
@@ -1487,6 +1505,43 @@ describe('init --provider', () => {
     expect(mockExit).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(saveLocalConfig).toHaveBeenCalledWith(expect.objectContaining({ provider: 'git' }));
+  });
+
+  it('does not replace a missing working config when its committed baseline enables Gerrit', async () => {
+    const { loadTeamConfig } = await import('../config.js');
+    vi.mocked(loadTeamConfig).mockResolvedValue(null);
+    const gerrit = await import('../utils/gerrit.js');
+    const effective = vi.spyOn(gerrit, 'readEffectiveGerritConfig')
+      .mockResolvedValue({ targetBranch: 'main', wip: true });
+    try {
+      await expect(init({ repo: GITLAB_REPO, provider: 'git', scope: 'user', force: true }))
+        .rejects.toThrow('no default config was written');
+      expect(mockGit.push).not.toHaveBeenCalled();
+      const { writeFile } = await import('../utils/fs.js');
+      expect(vi.mocked(writeFile).mock.calls.some(([file]) => file === path.join(localPath, 'teamai.yaml'))).toBe(false);
+    } finally {
+      effective.mockRestore();
+    }
+  });
+
+  it('skips member and reviewer publication for an effective Gerrit baseline', async () => {
+    const { loadTeamConfig } = await import('../config.js');
+    vi.mocked(loadTeamConfig).mockResolvedValue(TEAM_CONFIG);
+    const gerrit = await import('../utils/gerrit.js');
+    const reports = await import('../utils/reports-branch.js');
+    const effective = vi.spyOn(gerrit, 'readEffectiveGerritConfig')
+      .mockResolvedValue({ targetBranch: 'main', wip: true });
+    const update = vi.spyOn(reports, 'updateReports');
+    try {
+      await init({ repo: GITLAB_REPO, provider: 'git', scope: 'user', role: 'hai' });
+      expect(update).not.toHaveBeenCalled();
+      expect(mockGit.push).not.toHaveBeenCalled();
+      const { askConfirmation } = await import('../utils/prompt.js');
+      expect(vi.mocked(askConfirmation).mock.calls.some(([prompt]) => prompt.includes('reviewer'))).toBe(false);
+    } finally {
+      effective.mockRestore();
+      update.mockRestore();
+    }
   });
 
   it('refuses --provider gitlab for a host with no configured GitLab instance', async () => {

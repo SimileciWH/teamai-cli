@@ -49,6 +49,7 @@ teamai contribute --file /tmp/session-summary.md --title "Debugging K8s pod star
 
 - Run this as a **sub-agent** (Agent tool) to avoid polluting the main session's context
 - The document is pushed to the team repo's `teamai-learnings` branch, under `learnings/`, with no pull request
+- In this fork's opt-in Gerrit mode, automatic learnings publication is disabled. Keep the local draft or pending data and report that it was not delivered; do not promise it will appear on teammates' next pull.
 - Team members will see it on their next `teamai pull`
 - Keep summaries concise and actionable — this is a knowledge base, not a diary
 

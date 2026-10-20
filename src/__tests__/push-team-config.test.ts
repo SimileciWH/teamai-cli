@@ -105,6 +105,38 @@ describe('push carries teamai.yaml (source add regression)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('preserves an uncommitted Gerrit removal and refuses publication after refresh fails', async () => {
+    const teamRepo = await initTeamRepos(tmpDir);
+    const git = simpleGit(teamRepo);
+    const yamlPath = path.join(teamRepo, 'teamai.yaml');
+    fs.writeFileSync(yamlPath, 'version: 1\npublicSkills: []\ngerrit:\n  targetBranch: main\n');
+    await git.add('teamai.yaml');
+    await git.commit('Enable Gerrit');
+    await git.push('origin', 'main');
+    const original = 'version: 1\npublicSkills: [local-edit]\n';
+    fs.writeFileSync(yamlPath, original);
+    await git.remote(['set-url', 'origin', path.join(tmpDir, 'unreachable.git')]);
+    mockAutoDetectInit.mockResolvedValue({
+      localConfig: {
+        repo: { localPath: teamRepo, remote: path.join(tmpDir, 'remote.git'), kind: 'git' },
+        username: 'alice', scope: 'project', projectRoot: teamRepo, dataHome: path.join(tmpDir, 'data'),
+      },
+      teamConfig: { repo: 'https://example.test/team.git', provider: 'git', toolPaths: {} },
+    });
+    const originalExitCode = process.exitCode;
+    try {
+      const { push } = await import('../push.js');
+      await push({ all: true, message: 'Disable Gerrit mode' });
+      expect(process.exitCode).toBe(1);
+      expect(fs.readFileSync(yamlPath, 'utf8')).toBe(original);
+      expect(mockCreatePullRequest).not.toHaveBeenCalled();
+      const refs = await simpleGit(path.join(tmpDir, 'remote.git')).raw(['for-each-ref', '--format=%(refname)']);
+      expect(refs.trim()).toBe('refs/heads/main');
+    } finally {
+      process.exitCode = originalExitCode;
+    }
+  });
+
   it('config-only: source add edit survives reset and is pushed', async () => {
     const teamRepo = await initTeamRepos(tmpDir);
 

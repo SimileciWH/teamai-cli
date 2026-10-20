@@ -17,6 +17,7 @@ import { pathExists } from './fs.js';
 import { remoteBranchExists, hashObject, blobInHistory, pathAddedSince, pathDeletedSince, getHeadCommit, getFileContentAtRev } from './git.js';
 import { placedResourcePath } from '../push-namespaces.js';
 import { log } from './logger.js';
+import { gerritReviewMerged } from './gerrit.js';
 import type { PendingPush, PendingPushItem, ResourceItem, State } from '../types.js';
 
 /** Type and name: the identity a record is kept by while anything of that name is still scanned. */
@@ -81,6 +82,10 @@ export async function openPrDestinations(input: {
 export async function dropClosedPendingPushes(repoPath: string, pending: PendingPush[]): Promise<PendingPush[]> {
   const kept: PendingPush[] = [];
   for (const entry of pending ?? []) {
+    if (entry.gerrit) {
+      if (!await gerritReviewMerged(repoPath, entry)) kept.push(entry);
+      continue;
+    }
     if (await remoteBranchExists(repoPath, entry.branch) === false) {
       log.debug(`Dropping pending push ${entry.branch}: branch gone from origin`);
       continue;
@@ -113,6 +118,12 @@ export async function prunePendingPushes(
   const entries = pending ?? [];
 
   for (const entry of entries) {
+    if (entry.gerrit) {
+      // An absent local resource is not evidence that its review was closed.
+      // Keep the Change-Id until the target history proves it was merged.
+      if (!await gerritReviewMerged(repoPath, entry)) kept.push(entry);
+      continue;
+    }
     const stillScanned = entry.items.some((i) => scannedKeys.has(itemKey(i.type, i.name)));
     if (!stillScanned) {
       log.debug(`Dropping pending push ${entry.branch}: resources no longer pending`);

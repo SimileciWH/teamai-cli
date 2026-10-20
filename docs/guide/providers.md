@@ -66,6 +66,37 @@ The generic provider neither reads nor stores a platform token; the system `git`
 - HTTPS: configure a Git credential helper first. Do not put a username, password or token in the URL.
 - SSH: configure an SSH key first and make sure `ssh-agent` can reach the private key.
 
+### Gerrit review uploads (this fork)
+
+This fork adds an opt-in Gerrit path to `init`, `pull`, and `push`. Use the team's verified fork build: upstream releases may ignore the `gerrit` field and use ordinary branch pushes. Keep `autoUpdate: false` in the team config and `updatePolicy: skip` in local config so an upstream update does not replace the fork.
+
+Merge the following configuration into the remote default branch before members initialize:
+
+```yaml
+provider: git
+autoUpdate: false
+usageReport: false
+gerrit:
+  targetBranch: main
+  wip: true
+```
+
+Only a separate Git team repo is supported. `targetBranch` is a short branch name and must equal the remote default branch. Self mode, HTTP repos, and `push --branch` are unsupported. Git uses the existing SSH or HTTPS credentials; no Gerrit API token is needed.
+
+```bash
+teamai init https://gerrit.example.com/team/resources --provider git
+teamai pull
+teamai push --all --message "Improve review guidance"
+```
+
+The commit subject must be supplied as one line with `--message`. Push creates a commit with a valid `Change-Id` and uploads it directly to `refs/for/main%wip` (`wip` defaults to true; false omits `%wip`). It creates no ordinary remote branch, calls no PR API, and never submits a change. The server's review URL is printed when available. This follows Gerrit's [review upload](https://gerrit-review.googlesource.com/Documentation/user-upload.html) and [Change-Id](https://gerrit-review.googlesource.com/Documentation/user-changeid.html) protocols.
+
+Review state is saved locally before upload. Repeating the same contribution reuses its Change-Id; an unchanged retry reuses the saved commit. Select every resource in an existing review to update it, keeping its recorded destination. A config edit already in that review is retained. `teamai.yaml` can also be uploaded alone. Keep the local state and pending Git commits until review is resolved: this adapter does not discover reviews created on other machines. Rejected or interrupted pushes remain failures, including `no new changes`; verify an ambiguous result in Gerrit before changing local pending state. Abandoned or otherwise closed reviews require manual reconciliation. Records are cleared when the target branch history contains their Change-Id.
+
+Pending reviews are bound to a hash of the actual `origin` push URL. A different push destination, a reused scope for another repository, or multiple push URLs stops upload until the old review state is reconciled. Fetch and push URLs may differ. Deleting `gerrit` only in the working copy does not disable its committed protection; review that removal and pull the merged default branch first.
+
+Gerrit mode skips member registration and refuses automatic publication of `teamai-reports` and `teamai-learnings`, even if usage reporting is enabled elsewhere. Pending local data is retained; it is not delivered. Read-only pulls remain available and distribute merged default-branch resources. Unmerged Gerrit patch sets are not a `pull --team-ref` distribution target.
+
 ## GitHub provider
 
 ### Authentication
