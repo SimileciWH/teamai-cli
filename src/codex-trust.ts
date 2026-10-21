@@ -142,7 +142,12 @@ async function openAppServer(codexHome: string): Promise<AppServer> {
     close() {
       fail(new AppServerError('closed'));
       child.stdin?.end();
+      // A Windows command shim can exit while its descendant still owns stdout.
+      // Release our pipe handles so a completed diagnostic can leave the event loop.
+      child.stdin?.destroy();
+      child.stdout?.destroy();
       child.kill();
+      child.unref();
     },
   };
   try {
