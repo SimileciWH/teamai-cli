@@ -12,6 +12,7 @@ import { log } from './utils/logger.js';
 import { expandHome, ensureDir } from './utils/fs.js';
 import { getTeamaiHomeDir, getUpdateLockPath } from './types.js';
 import { askConfirmation, isInteractive } from './utils/prompt.js';
+import { INTERNAL_DISTRIBUTION } from './internal-distribution.js';
 
 // `getCurrentVersion` and `getCurrentPackageName` live in `./package-info.ts`
 // so both this module and the provider registry can read package metadata
@@ -128,6 +129,7 @@ export async function fetchLatestVersion(
   registry?: string,
   timeout: number = VERSION_CHECK_TIMEOUT,
 ): Promise<string | null> {
+  if (INTERNAL_DISTRIBUTION) return null;
   const pkgName = getCurrentPackageName();
   const resolvedRegistry = registry ?? resolveRegistryForPackage(pkgName);
   try {
@@ -614,8 +616,9 @@ export interface CheckResult {
  * Uses cached result if within TTL unless force is true.
  */
 export async function checkForUpdate(options?: { force?: boolean; dryRun?: boolean }): Promise<CheckResult> {
-  const state = await loadState();
   const current = getCurrentVersion();
+  if (INTERNAL_DISTRIBUTION) return { available: false, current, latest: current };
+  const state = await loadState();
 
   // Use cached result if valid
   if (!options?.force && isCacheValid(state.lastUpdateCheck)) {
@@ -655,6 +658,10 @@ export async function checkForUpdate(options?: { force?: boolean; dryRun?: boole
  * Perform the actual update (check + install based on policy)
  */
 export async function doUpdate(): Promise<void> {
+  if (INTERNAL_DISTRIBUTION) {
+    log.debug('Public npm self-update is disabled for the RAYMX internal distribution.');
+    return;
+  }
   const result = await checkForUpdate();
   if (!result.available) {
     log.info(`Already up to date (v${result.current})`);
@@ -811,6 +818,10 @@ export interface UpdateOptions {
  * default: full update flow (check + install)
  */
 export async function update(options: UpdateOptions): Promise<void> {
+  if (INTERNAL_DISTRIBUTION) {
+    log.info('This RAYMX build uses the internal installer. Run the installed teamai launcher or rerun the company installer.');
+    return;
+  }
   if (options.check || options.dryRun) {
     const result = await checkForUpdate({ dryRun: options.dryRun });
     if (result.available) {

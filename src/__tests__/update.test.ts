@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach, type Mock, type MockInstance } from 'vitest';
 
+// Preserve coverage of the inherited updater while the internal build disables it.
+vi.mock('../internal-distribution.js', () => ({ INTERNAL_DISTRIBUTION: false }));
+
 // ─── Mocks ──────────────────────────────────────────────
 
 // update.ts uses `promisify(execFile)`. Mock execFile with a promisify.custom

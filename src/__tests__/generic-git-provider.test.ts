@@ -181,7 +181,7 @@ describe('GenericGitProvider transport', () => {
     expect(mockedSpawnSync).toHaveBeenCalledWith(
       'git',
       ['clone', '--', 'git@code.qschou.com:Enterprise/arb-workflow-kit.git', '/tmp/team-repo'],
-      expect.objectContaining({ timeout: 180_000 }),
+      expect.objectContaining({ timeout: 600_000 }),
     );
   });
 
@@ -195,7 +195,7 @@ describe('GenericGitProvider transport', () => {
     expect(mockedSpawnSync).toHaveBeenCalledWith(
       'git',
       ['clone', '--', input, '/tmp/team-repo'],
-      expect.objectContaining({ timeout: 180_000, windowsHide: true }),
+      expect.objectContaining({ timeout: 600_000, windowsHide: true }),
     );
   });
 

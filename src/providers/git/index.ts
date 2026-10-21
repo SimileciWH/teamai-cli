@@ -90,15 +90,15 @@ export class GenericGitProvider implements GitProvider {
     const result = spawnSync('git', ['clone', '--', remoteUrl, localPath], {
       encoding: 'utf-8',
       stdio: ['inherit', 'pipe', 'pipe'],
-      // Match the 180s default used by the shallow-clone path in clone.ts:
-      // large self-hosted repos over slow/VPN links need the extra headroom.
-      timeout: 180_000,
+      // The internal knowledge repository includes versioned bundles. Its first
+      // full transfer can exceed three minutes on the company VPN.
+      timeout: 600_000,
       maxBuffer: 10 * 1024 * 1024,
       windowsHide: true,
     });
     if (result.error || result.status !== 0) {
       const output = `${result.stderr ?? ''} ${result.stdout ?? ''}`.trim();
-      const detail = output || result.error?.message || `exit ${result.status ?? 1}`;
+      const detail = [result.error?.message, output].filter(Boolean).join(': ') || `exit ${result.status ?? 1}`;
       throw new Error(`git clone failed: ${sanitizeGitUrl(detail)}`);
     }
   }
