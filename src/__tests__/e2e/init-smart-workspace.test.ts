@@ -85,6 +85,20 @@ describe.skipIf(process.platform === 'win32')('short workspace init with the bui
   });
   afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 
+  it('rejects a plain directory before cloning or writing any configuration', () => {
+    const f = fixture('plain-directory', ['codex']);
+    fs.rmSync(path.join(f.project, '.git'), { recursive: true });
+    const result = f.run('init', TEAM);
+    expect(result.code, result.output).toBe(1);
+    expect(result.output).toContain('Run this command from your cloned source repository');
+    expect(result.output).not.toContain('Team repo cloned');
+    expect(result.output).not.toContain('at projectForOnboarding');
+    expect(fs.readdirSync(f.project)).toEqual(['README.md']);
+    expect(f.configFile()).toBeUndefined();
+    expect(fs.existsSync(path.join(f.home, '.teamai/config.yaml'))).toBe(false);
+    expect(fs.existsSync(path.join(f.home, '.teamai/team-repo'))).toBe(false);
+  }, 90_000);
+
   it('binds, selects and delivers to all five tools with only the URL, then safely repeats', () => {
     const f = fixture('all', ['opencode', 'pi', 'codex', 'kimi', 'claude']);
     const result = f.run('init', TEAM);
@@ -196,6 +210,7 @@ describe.skipIf(process.platform === 'win32')('short workspace init with the bui
     const result = f.run('init', TEAM);
     expect(result.code, result.output).toBe(1);
     expect(result.output).toContain('does not match a registered source repository');
+    expect(result.output).not.toContain('at projectForOnboarding');
     expect(f.configFile()).toBeUndefined();
   }, 90_000);
 

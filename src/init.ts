@@ -1589,6 +1589,13 @@ export async function init(options: GlobalOptions & {
     process.exit(1);
     return;
   }
+  if (scope === 'project' && !(await isInsideGitRepo(process.cwd()))) {
+    log.error(`This directory is not a Git checkout: ${process.cwd()}`);
+    log.info('Run this command from your cloned source repository, not its parent or an empty project-named folder.');
+    log.info('For user-wide shared resources instead, add --scope user. Nothing was downloaded or bound.');
+    process.exit(1);
+    return;
+  }
   const existingLocalConfig = await loadLocalConfigForScope(scope, projectRoot);
   const teamaiHome = scope === 'project' && projectRoot
     ? (existingLocalConfig?.dataHome ?? await resolveProjectDataHome(projectRoot))
@@ -1621,10 +1628,6 @@ export async function init(options: GlobalOptions & {
     log.warn(fallbackReason);
   }
   printScopeSummary(scope, projectRoot, explicit);
-
-  if (scope === 'project' && !(await isInsideGitRepo(process.cwd()))) {
-    log.warn(`cwd is not inside a git repository; will create ${teamaiHome}/`);
-  }
 
   // Step 0.5: Re-init guard — warn if config already exists
   if (await pathExists(existingConfigPath)) {
@@ -1930,9 +1933,15 @@ export async function init(options: GlobalOptions & {
       throw new Error(`Unknown onboarding role "${roleForInit}". Fix onboarding.defaultRole or choose a declared --role. Nothing was bound.`);
     }
     if (projectForInit === undefined) {
-      projectForInit = sameBinding && carriedConfig.projects !== undefined
-        ? carriedConfig.projects.join(',')
-        : await projectForOnboarding(localPath, projectRoot!);
+      try {
+        projectForInit = sameBinding && carriedConfig.projects !== undefined
+          ? carriedConfig.projects.join(',')
+          : await projectForOnboarding(localPath, projectRoot!);
+      } catch (e) {
+        log.error((e as Error).message);
+        process.exit(1);
+        return;
+      }
     }
     if (normalizeAgentList(options.agent).length === 0) {
       autoAgents = detectOnboardingAgents(carriedConfig?.disabledAgents);

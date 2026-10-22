@@ -34,6 +34,8 @@ vi.mock('fs-extra', () => ({
     readFile: vi.fn(),
     writeFile: vi.fn(),
     readdir: vi.fn().mockResolvedValue([]),
+    link: vi.fn().mockResolvedValue(undefined),
+    remove: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -274,6 +276,18 @@ describe('init', () => {
     });
 
     expect(mockExit).toHaveBeenCalledWith(1);
+    expect(mockEnsureGfInstalled).not.toHaveBeenCalled();
+    expect(mockGfRepoClone).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-Git workspace before loading config or contacting a provider', async () => {
+    const { loadLocalConfigForScope, resolveProjectDataHome } = await import('../config.js');
+    const { log } = await import('../utils/logger.js');
+    await init({ repo: 'https://git.woa.com/HyperAI/teamai-test.git' });
+    expect(mockExit).toHaveBeenCalledWith(1);
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('not a Git checkout'));
+    expect(loadLocalConfigForScope).not.toHaveBeenCalled();
+    expect(resolveProjectDataHome).not.toHaveBeenCalled();
     expect(mockEnsureGfInstalled).not.toHaveBeenCalled();
     expect(mockGfRepoClone).not.toHaveBeenCalled();
   });
@@ -1332,6 +1346,8 @@ describe('init', () => {
       });
 
       it('lets a project-scope init without the variable inherit the user-scope record', async () => {
+        const existingPaths = pathExistsFn;
+        pathExistsFn = (p: string) => p === path.join(process.cwd(), '.git') || existingPaths(p);
         vi.mocked(loadLocalConfigForScope).mockImplementation(async (scope) =>
           scope === 'user' ? previousConfig({ claude: relocated }) : null);
         delete process.env.CLAUDE_CONFIG_DIR;
@@ -1624,6 +1640,7 @@ describe('init --provider', () => {
   });
 
   it.each(['user', 'project'] as const)('keeps provider detection for legacy %s re-init', async (scope) => {
+    if (scope === 'project') pathExistsFn = (p: string) => p === path.join(process.cwd(), '.git');
     vi.stubEnv('GITLAB_URL', 'https://gitlab.example.test');
     const { loadTeamConfig } = await import('../config.js');
     vi.mocked(loadLocalConfigForScope).mockResolvedValueOnce({

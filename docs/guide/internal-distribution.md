@@ -7,3 +7,5 @@ The installed internal launcher handles `teamai update` and `teamai update --che
 Install in the same operating system and user environment as the coding agent. Windows-native and WSL installations are separate. The company installer preserves previous versions and verifies the runtime before activation; it does not require administrator privileges.
 
 The knowledge repository contains release bundles for multiple versions, so the first full Gerrit clone can take several minutes. The generic Git provider allows up to ten minutes and preserves the operating-system error on failure. Subsequent pulls transfer changes incrementally.
+
+Run workspace `teamai init <team-repo-url>` from your actual source Git checkout. A parent directory or an empty folder named after the project is not a checkout: init stops before authentication, cloning or configuration writes. For resources shared across your user account, use `--scope user`. HTTP setup retains its Git-free behavior. An unregistered source remote produces a concise error without binding the wrong project.
