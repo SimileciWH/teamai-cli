@@ -4,7 +4,8 @@ import path from 'node:path';
 import { readWorkspaceChildren } from './workspace-children.js';
 import { saveLocalConfig, loadTeamConfig, saveLocalConfigForScope, loadLocalConfigForScope, loadStateForScope, saveStateForScope, resolveProjectDataHome } from './config.js';
 import { deliveredHookFiles, describeUnappliedTeamHooks, hasTeamaiHooks, reconcileHooks, reconcileTeamHooksForConfig, reportCodexTrust, trustCodexForScope } from './hooks.js';
-import { configureGitUser, initRepo, isGitRepo, getRemoteUrl, remotesMatch, redactGitCredentials, pullRepoFastForward, DetachedTeamRepoError, pushRepoDirectly, autoPushViaMR, initPushBlockTimeoutMs } from './utils/git.js';
+import { configureGitUser, initRepo, isGitRepo, getRemoteUrl, remotesMatch, repoIdentity, redactGitCredentials, pullRepoFastForward, DetachedTeamRepoError, pushRepoDirectly, autoPushViaMR, initPushBlockTimeoutMs } from './utils/git.js';
+import { detectOnboardingAgents, matchesInitBinding, projectForOnboarding, type AgentDetection } from './onboarding.js';
 import { withTimeout } from './utils/async.js';
 import { getProvider, detectProvider, detectProviderForInit, RepoNotFoundError, OrganizationNotFoundError, RepoCreatePermissionError } from './providers/index.js';
 import { parseGenericGitExistingRemote } from './providers/git/repo-url.js';
@@ -1597,6 +1598,13 @@ export async function init(options: GlobalOptions & {
   // init stopped after moving it aside, the one it set aside (#823 item 17).
   const carriedConfig = existingLocalConfig
     ?? (await pathExists(existingConfigPath) ? null : await loadConfigSetAside(existingConfigPath));
+  // Reuse a saved transport-only provider only for this same repository. A
+  // short re-init must not start a platform login or forget a Git-only choice.
+  if (scope === 'project' && !forcedProvider && carriedConfig?.provider && repoArg
+    && matchesInitBinding(carriedConfig.repo.remote, repoArg, carriedConfig.provider)
+    && (await loadTeamConfig(carriedConfig.repo.localPath))?.onboarding) {
+    forcedProvider = carriedConfig.provider;
+  }
   let inheritUserScope: boolean | undefined;
   try {
     inheritUserScope = resolveInheritUserScope(
@@ -1620,8 +1628,15 @@ export async function init(options: GlobalOptions & {
 
   // Step 0.5: Re-init guard — warn if config already exists
   if (await pathExists(existingConfigPath)) {
+    const sameShortBinding = scope === 'project' && existingLocalConfig && repoArg
+      && matchesInitBinding(existingLocalConfig.repo.remote, repoArg, forcedProvider)
+      && options.role === undefined && options.project === undefined
+      && normalizeAgentList(options.agent).length === 0
+      && (await loadTeamConfig(existingLocalConfig.repo.localPath))?.onboarding;
     log.warn(`teamai is already initialized for ${installScopeName(scope)} scope at ${existingConfigPath}`);
-    if (options.force) {
+    if (sameShortBinding) {
+      log.info('Reusing this workspace binding and preserving its role, projects and disabled tools.');
+    } else if (options.force) {
       log.info('Overwriting existing config (--force)');
     } else {
       const confirmed = await askConfirmation('Overwrite existing config? [y/N] ');
@@ -1754,7 +1769,11 @@ export async function init(options: GlobalOptions & {
         try {
           // Non-destructive refresh only: never reset --hard from init (would
           // discard local commits / tracked edits on an ordinary re-init).
-          const pullResult = await pullRepoFastForward(localPath);
+          // A same-binding pin is refreshed by pull's ref-aware transition below.
+          const keepPin = scope === 'project' && carriedConfig?.repo.ref
+            && matchesInitBinding(carriedConfig.repo.remote, repoInput, forcedProvider)
+            && (await loadTeamConfig(localPath))?.onboarding;
+          const pullResult = keepPin ? 'already up to date' : await pullRepoFastForward(localPath);
           if (pullResult !== 'already up to date') {
             log.info(`Refreshed existing clone (${pullResult})`);
           }
@@ -1897,6 +1916,29 @@ export async function init(options: GlobalOptions & {
   if (gerritConfig && !teamConfig) {
     throw new Error('The Gerrit teamai.yaml is invalid. Fix it before initializing; no default config was written.');
   }
+
+  // A team opts into short workspace init; other init modes keep their prompts.
+  const onboarding = scope === 'project' ? teamConfig?.onboarding : undefined;
+  const sameBinding = carriedConfig && repoIdentity(carriedConfig.repo.remote) === repoIdentity(repoInfo.httpsUrl);
+  let roleForInit = options.role;
+  let projectForInit = options.project;
+  let autoAgents: AgentDetection | undefined;
+  if (onboarding) {
+    roleForInit ??= (sameBinding ? carriedConfig.primaryRole : undefined) ?? onboarding.defaultRole;
+    const roles = await loadRolesManifest(localPath);
+    if (!roles.roles.some(role => role.id === roleForInit)) {
+      throw new Error(`Unknown onboarding role "${roleForInit}". Fix onboarding.defaultRole or choose a declared --role. Nothing was bound.`);
+    }
+    if (projectForInit === undefined) {
+      projectForInit = sameBinding && carriedConfig.projects !== undefined
+        ? carriedConfig.projects.join(',')
+        : await projectForOnboarding(localPath, projectRoot!);
+    }
+    if (normalizeAgentList(options.agent).length === 0) {
+      autoAgents = detectOnboardingAgents(carriedConfig?.disabledAgents);
+      log.info(`Detected AI tools: ${autoAgents.selected.join(', ') || 'none'}`);
+    }
+  }
   const createdSkeleton = !teamConfig;
   if (!teamConfig) {
     log.warn('teamai.yaml not found in repo. Creating default config...');
@@ -1940,7 +1982,7 @@ export async function init(options: GlobalOptions & {
   let roleProfile: Awaited<ReturnType<typeof promptForRoleProfile>> | undefined;
   let rolePromptedEarly = false;
   let projectsManifest: ProjectsManifest | null | undefined;
-  if (options.project === undefined) {
+  if (projectForInit === undefined) {
     try {
       projectsManifest = await loadProjectsManifest(localPath);
     } catch (error) {
@@ -1951,7 +1993,7 @@ export async function init(options: GlobalOptions & {
   if (projectsManifest?.projects.length) {
     rolePromptedEarly = true;
     try {
-      roleProfile = await promptForRoleProfile(localPath, options.role);
+      roleProfile = await promptForRoleProfile(localPath, roleForInit);
     } catch (error) {
       const msg = (error as Error).message;
       if (msg.includes('Roles manifest not found')) {
@@ -1965,7 +2007,7 @@ export async function init(options: GlobalOptions & {
 
   let resolvedProjects: string[] = [];
   try {
-    resolvedProjects = (await resolveProjectsForInit(localPath, options.project, projectsManifest)).projects ?? [];
+    resolvedProjects = (await resolveProjectsForInit(localPath, projectForInit, projectsManifest)).projects ?? [];
   } catch (error) {
     // A bad --project is a user error on the main init path: fail loudly.
     log.error((error as Error).message);
@@ -2128,8 +2170,10 @@ export async function init(options: GlobalOptions & {
   }
 
   // Step 6: Save local config
+  const preservedConfig = onboarding && sameBinding ? carriedConfig : undefined;
   const localConfig: LocalConfig = {
-    repo: { localPath, remote: repoInfo.httpsUrl },
+    ...preservedConfig,
+    repo: { ...preservedConfig?.repo, localPath, remote: repoInfo.httpsUrl },
     username,
     ...(forcedProvider ? { provider: forcedProvider } : {}),
     scope,
@@ -2141,7 +2185,7 @@ export async function init(options: GlobalOptions & {
 
   if (!rolePromptedEarly) {
     try {
-      roleProfile = await promptForRoleProfile(localPath, options.role);
+      roleProfile = await promptForRoleProfile(localPath, roleForInit);
     } catch (error) {
       const msg = (error as Error).message;
       if (msg.includes('Roles manifest not found')) {
@@ -2152,21 +2196,30 @@ export async function init(options: GlobalOptions & {
       }
     }
   }
-  if (roleProfile) Object.assign(localConfig, roleProfile);
+  if (roleProfile) {
+    if (onboarding && sameBinding && options.role === undefined) {
+      roleProfile.additionalRoles = [...carriedConfig.additionalRoles];
+    }
+    Object.assign(localConfig, roleProfile);
+  }
 
   // Projects were resolved before member registration so both records agree.
   localConfig.projects = resolvedProjects;
 
   // Persist --agent into enabledAgents (additive across runs)
-  const requestedAgents = normalizeAgentList(options.agent);
+  const requestedAgents = autoAgents?.selected ?? normalizeAgentList(options.agent);
   // Interactive project init without --agent asks which tools the member uses.
   // Non-interactive runs skip the picker. Calling it would copy tools found in
   // HOME, and this init enables nothing unless --agent names a tool.
-  if (scope === 'project' && requestedAgents.length === 0
+  if (!onboarding && scope === 'project' && requestedAgents.length === 0
     && !options.silent && !options.force && isInteractive()) {
     requestedAgents.push(...await promptForSelfModeAgents({ projectScope: true }));
   }
-  if (requestedAgents.length > 0) {
+  if (autoAgents) {
+    // An explicit empty allowlist disables all clients when none is installed.
+    localConfig.enabledAgents = [...requestedAgents];
+    localConfig.disabledAgents = [...(carriedConfig?.disabledAgents ?? [])];
+  } else if (requestedAgents.length > 0) {
     // As loaded before the clone: that config may have been moved aside since.
     const prev = carriedConfig?.enabledAgents ?? [];
     localConfig.enabledAgents = [...new Set([...prev, ...requestedAgents])];
@@ -2271,13 +2324,14 @@ export async function init(options: GlobalOptions & {
       log.warn(`The built-in teamai skill was not deployed: ${(e as Error).message}`);
     }
 
-    // After hooks. There is no closing pull; sync MCP here so a value the
+    // After hooks. Legacy init has no closing pull; sync MCP here so a value the
     // script collected is in the tool config. Skipped when teamai.yaml did not
     // load: there is no script, and a second read would report the same error.
     await runInitScript(localConfig, 'postInit', options.dryRun, true);
   }
 
-  // Init does not copy team resources (#1065). The next session start creates
+  // Legacy init does not copy team resources (#1065). Short onboarding below
+  // performs a closing pull. Otherwise the next session start creates
   // the current agent's project directory when it is missing and pulls.
   // `teamai pull` pulls into directories that already exist. A tool that reads
   // rules and MCP once, before that hook, sees them from the following session.
@@ -2294,6 +2348,40 @@ export async function init(options: GlobalOptions & {
     } catch (e) {
       log.warn(`Could not update teamai's delivered git exclude block: ${(e as Error).message}. Fix the cause, then run \`teamai pull\`.`);
     }
+  }
+
+  if (onboarding) {
+    let syncStatus = 'skipped (no supported AI tool found)';
+    if (localConfig.enabledAgents?.length) {
+      const result: { completed: boolean; delivery?: 'pending' | 'complete' | 'failed'; postPull?: import('./post-pull.js').PostPullOutcome } = { completed: false };
+      try {
+        const { pull } = await import('./pull.js');
+        await pull({ silent: options.silent, dryRun: options.dryRun }, result);
+        syncStatus = result.delivery === 'complete' && !process.exitCode ? 'complete' : 'incomplete';
+        if (result.postPull === 'failed' || result.postPull === 'pending') {
+          syncStatus = `incomplete (postPull ${result.postPull}; see ~/.teamai/debug.log)`;
+        }
+      } catch (error) {
+        log.error(`Initial resource sync failed: ${(error as Error).message}`);
+        syncStatus = 'failed';
+      }
+      if (syncStatus !== 'complete') process.exitCode = 1;
+    }
+    log.info('Setup summary:');
+    log.info(`  Workspace: ${projectRoot}`);
+    log.info(`  Project: ${localConfig.projects?.join(', ') || 'shared resources'}`);
+    log.info(`  Role: ${localConfig.primaryRole ?? 'none'}`);
+    log.info(`  Configured tools: ${localConfig.enabledAgents?.join(', ') || 'none'}`);
+    if (autoAgents) {
+      log.info(`  Skipped (not found on PATH): ${autoAgents.missing.join(', ') || 'none'}`);
+      if (autoAgents.disabled.length) log.info(`  Skipped (previously disabled): ${autoAgents.disabled.join(', ')}`);
+    }
+    log.info(`  Resource sync: ${syncStatus}`);
+    if (syncStatus === 'complete') log.success('Setup complete. Open a new AI session in this project.');
+    else if (!localConfig.enabledAgents?.length) log.info('Binding saved. Install a supported AI tool, then run the same init command again.');
+    else log.warn('Binding saved, but resource sync needs attention. Fix the error above, then run teamai pull.');
+    closePrompt();
+    return;
   }
 
   log.success('teamai initialized successfully!');

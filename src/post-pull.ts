@@ -69,23 +69,25 @@ function resolvePostPullScript(teamConfig: TeamaiConfig, repoPath: string): stri
  * nothing and waits the script out under the budget; a human-triggered pull
  * passes true and gets the fire-and-forget shape.
  */
+export type PostPullOutcome = 'absent' | 'complete' | 'failed' | 'pending';
+
 export async function runDeclaredPostPull(
   repoPath: string,
   {
     interactive = false,
     localConfig,
   }: { interactive?: boolean; localConfig?: LocalConfig } = {},
-): Promise<void> {
+): Promise<PostPullOutcome> {
   try {
     const teamConfig = await loadTeamConfig(repoPath);
-    if (!teamConfig) return;
+    if (!teamConfig) return 'failed';
     const scriptPath = resolvePostPullScript(teamConfig, repoPath);
-    if (!scriptPath) return;
+    if (!scriptPath) return 'absent';
     // A declared-but-missing script is a rollout state (not yet committed,
     // submodule not populated), not an error — one stat and done.
     if (!fs.existsSync(scriptPath)) {
       log.debug(`postPull: declared script not found: ${scriptPath}`);
-      return;
+      return 'pending';
     }
     // Containment: this script runs on every member's machine, so the repo
     // must not be able to point it outside its own clone, symlinks included.
@@ -99,11 +101,13 @@ export async function runDeclaredPostPull(
       : undefined;
     if (interactive) {
       runPostPullInteractive(scriptPath, repoPath, env);
+      return 'pending';
     } else {
-      await runPostPull(scriptPath, repoPath, POST_PULL_BUDGET_SEC, env);
+      return await runPostPull(scriptPath, repoPath, POST_PULL_BUDGET_SEC, env);
     }
   } catch (e) {
     log.debug(`postPull: skipped: ${(e as Error).message}`);
+    return 'failed';
   }
 }
 
@@ -169,7 +173,7 @@ export async function runPostPull(
   repoPath: string,
   budgetSec: number = POST_PULL_BUDGET_SEC,
   env?: NodeJS.ProcessEnv,
-): Promise<void> {
+): Promise<PostPullOutcome> {
   log.debug(`postPull: launched path=${scriptPath} budget=${budgetSec}s`);
   const startedAt = Date.now();
   const child = spawnScript(scriptPath, repoPath, ['ignore', 'pipe', 'pipe'], budgetSec, env);
@@ -194,15 +198,16 @@ export async function runPostPull(
     // pull for the script's whole remaining runtime.
     detachChild(child);
     log.debug(`postPull: timed out after ${budgetSec}s — orphaned ${scriptPath} (still running)`);
-    return;
+    return 'pending';
   }
 
   const ms = Date.now() - startedAt;
-  if (code === null) return;
+  if (code === null) return 'failed';
   if (code === 0) {
     log.debug(`postPull: exited 0 in ${ms}ms (${scriptPath})`);
-    return;
+    return 'complete';
   }
   const tail = redactWithEnv(readTail());
   log.debug(`postPull: exited ${code} in ${ms}ms (${scriptPath})${tail ? ` — ${tail}` : ''}`);
+  return 'failed';
 }

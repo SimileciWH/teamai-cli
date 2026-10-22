@@ -15,9 +15,9 @@ import { sameEnvName } from './env-key.js';
 //  Keeping the differences here — rather than in the reconcile engine — is the
 //  same split agents uses between agent-format.ts and its handler.
 
-export type McpFormat = 'claude' | 'cursor' | 'buddy' | 'codex' | 'opencode' | 'copilot' | 'pi' | 'muse';
+export type McpFormat = 'claude' | 'cursor' | 'buddy' | 'codex' | 'opencode' | 'copilot' | 'pi' | 'muse' | 'kimi';
 
-const CLAUDE_TOOLS = new Set(['claude', 'claude-internal', 'tclaude', 'qoder', 'qoder-cn', 'kiro', 'zcode', 'omp', 'trae', 'trae-cn']);
+const CLAUDE_TOOLS = new Set(['claude', 'claude-internal', 'tclaude', 'qoder', 'qoder-cn', 'kiro', 'zcode', 'omp', 'trae', 'trae-cn', 'kimi']);
 const CURSOR_TOOLS = new Set(['cursor']);
 const CODEX_TOOLS = new Set(['codex', 'codex-internal', 'tcodex']);
 const BUDDY_TOOLS = new Set(['codebuddy', 'workbuddy']);
@@ -26,6 +26,7 @@ const COPILOT_TOOLS = new Set(['copilot']);
 const COPILOT_ALL_TOOLS = '*';
 
 export function detectMcpFormat(tool: string): McpFormat | null {
+  if (tool === 'kimi') return 'kimi';
   if (tool === 'pi') return 'pi';
   if (tool === 'muse') return 'muse';
   if (CLAUDE_TOOLS.has(tool)) return 'claude';
@@ -43,6 +44,7 @@ export function detectMcpFormat(tool: string): McpFormat | null {
  * has no entry here.
  */
 export const MCP_SERVER_KEY: Record<Exclude<McpFormat, 'codex'>, string> = {
+  kimi: 'mcpServers',
   pi: 'mcpServers',
   muse: 'mcpServers',
   claude: 'mcpServers',
@@ -60,6 +62,7 @@ export function sameServerKey(a: McpFormat, b: McpFormat): boolean {
 
 /** Transports each format can actually express. */
 const SUPPORTED_TRANSPORTS: Record<McpFormat, Set<McpTransport>> = {
+  kimi: new Set<McpTransport>(['stdio', 'http', 'sse']),
   pi: new Set<McpTransport>(['stdio', 'http']),
   // Muse Code fails startup validation on a single `type: sse` server and then
   // loads no MCP server at all.
@@ -300,6 +303,13 @@ function renderOpencode(def: McpServerDef): McpJsonEntry {
 
 /** Render the JSON-shaped entry for a format. Codex is handled separately (TOML). */
 export function renderJsonEntry(format: Exclude<McpFormat, 'codex'>, def: McpServerDef): McpJsonEntry {
+  if (format === 'kimi') {
+    const entry = renderClaude(def);
+    delete entry.type;
+    if (def.transport === 'sse') entry.transport = 'sse';
+    if (def.timeout !== undefined) entry.startupTimeoutMs = def.timeout;
+    return entry;
+  }
   if (format === 'pi') {
     const entry = renderClaude(def);
     // Pi uses seconds (including fractions); team definitions use milliseconds.

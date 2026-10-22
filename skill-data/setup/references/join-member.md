@@ -76,7 +76,16 @@ to add them to the repo.
 
 ## Step 4 — Initialize with the URL (you run it)
 
-Before running `init`, ask whether the user wants to activate any logical
+For a team that enables `teamai.yaml` `onboarding`, run the plain command inside
+the source checkout. Workspace init selects the team's default role, matches
+source remotes to `manifest/projects.yaml` `repositories`, detects installed
+OpenCode/Pi/Codex/Kimi/Claude CLIs, skips missing ones, and performs the initial
+sync. Relay its final summary; do not ask the member to repeat these choices.
+No match or an ambiguous match requires the maintainer to fix the mapping (or
+an explicit project choice); never guess from the folder name. Other teams and
+user-scope installs keep the picker flow below.
+
+For the legacy picker flow, before running `init`, ask whether the user wants to activate any logical
 projects this team repo declares. If `init` lists **Available projects**, show
 the names/IDs and ask which belong to this setup; enter the corresponding
 comma-separated numbers. Press Enter for none only when the user explicitly
@@ -93,7 +102,7 @@ teamai init https://<platform>/<org>/<repo>
 teamai init https://<platform>/<org>/<repo> --scope user
 ```
 
-**Set up all their AI tools by default (global rule 9).** Don't add `--agent` to
+**Legacy picker: set up all their AI tools by default (global rule 9).** Don't add `--agent` to
 restrict the install unless the user said to. Omitting it gives a picker — select
 **every AI tool already installed**. Afterwards, **tell the user (in their
 language) which agents will now auto-sync TeamAI**, and note any detected tool that
@@ -133,7 +142,7 @@ section "Which tools actually get hooks".
 
 ## Step 6 — Confirm the skills actually arrived
 
-`teamai init` does not copy team skills, rules or MCP. They arrive on the next
+Without workspace `onboarding`, `teamai init` does not copy team skills, rules or MCP. They arrive on the next
 session start, or when you run `teamai pull`. A workspace-scope init run without a
 terminal and without `--agent` creates no tool directory; that directory appears
 when the user first opens that tool in the project, and that session start pulls.

@@ -1,4 +1,4 @@
-import { type GlobalOptions, type LocalConfig } from '../types.js';
+import { isAgentExcluded, resolveToolRootDir, type GlobalOptions, type LocalConfig } from '../types.js';
 import { autoDetectInit } from '../config.js';
 import { assertNotReadOnly } from '../read-only.js';
 import { pathExists } from '../utils/fs.js';
@@ -8,6 +8,7 @@ import {
   marketplaceSourceLocation,
 } from './adapters/claude-plugin.js';
 import { NpmAdapter } from './adapters/npm.js';
+import { CodexPluginAdapter } from './adapters/codex-plugin.js';
 import type { PackageInstallContext } from './adapters/base.js';
 import { detectPackageEnvironment } from './env-detect.js';
 import {
@@ -118,7 +119,7 @@ async function resolveClaudeTarget(
 }
 
 interface AddedTarget {
-  ecosystem: 'npm' | 'claude';
+  ecosystem: 'npm' | 'claude' | 'codex';
   npm?: NpmSpec;
   marketplace?: ClaudeMarketplace;
   pluginName?: string;
@@ -128,8 +129,17 @@ async function addTarget(
   target: string,
   manifest: PackageManifest,
   claude: ClaudePluginAdapter,
-  options: Pick<GlobalOptions, 'global' | 'registry' | 'npm' | 'claude'>,
+  options: Pick<GlobalOptions, 'global' | 'registry' | 'npm' | 'claude' | 'codex'>,
 ): Promise<AddedTarget> {
+  if (options.codex) {
+    const marketplace = pluginMarketplace(target);
+    const ecosystem = manifest.packages.codex;
+    if (!marketplace || !ecosystem?.marketplaces.some(item => item.name === marketplace)) {
+      throw new Error('Declare the Codex marketplace in packages.codex.marketplaces before installing plugin@marketplace.');
+    }
+    if (!ecosystem.plugins.some(item => item.name === target)) ecosystem.plugins.push({ name: target });
+    return { ecosystem: 'codex', pluginName: target };
+  }
   const addNpm = (): AddedTarget => {
     const spec = upsertNpm(manifest, {
       ...parseNpmTarget(target),
@@ -184,22 +194,24 @@ function validateOrThrow(manifest: PackageManifest): void {
 export async function pkgInstall(
   target: string | undefined,
   options: GlobalOptions,
+  existingConfig?: LocalConfig,
 ): Promise<void> {
-  const { localConfig } = await autoDetectInit(undefined, { dryRun: options.dryRun });
+  const localConfig = existingConfig ?? (await autoDetectInit(undefined, { dryRun: options.dryRun })).localConfig;
   const manifest = await loadPackageManifest(localConfig.repo.localPath);
   const cwd = process.cwd();
   const lockDir = await packageLockDir(localConfig, { readOnly: options.dryRun });
   const npm = new NpmAdapter();
   const claude = new ClaudePluginAdapter();
+  const codex = new CodexPluginAdapter(undefined, resolveToolRootDir('codex', '.codex', localConfig.toolRoots));
 
-  if (options.npm && options.claude) {
-    throw new Error('--npm and --claude are mutually exclusive');
+  if ([options.npm, options.claude, options.codex].filter(Boolean).length > 1) {
+    throw new Error('--npm, --claude and --codex are mutually exclusive');
   }
-  if (options.claude && (options.global || options.registry)) {
+  if ((options.claude || options.codex) && (options.global || options.registry)) {
     throw new Error('--global and --registry only apply to npm package targets');
   }
-  if (!target && (options.global || options.registry || options.npm || options.claude)) {
-    throw new Error('--global, --registry, --npm, and --claude require a package target');
+  if (!target && (options.global || options.registry || options.npm || options.claude || options.codex)) {
+    throw new Error('--global, --registry, --npm, --claude and --codex require a package target');
   }
   if (target) assertNotReadOnly(localConfig, 'teamai packages install <target>');
   const added = target ? await addTarget(target, manifest, claude, options) : undefined;
@@ -215,6 +227,7 @@ export async function pkgInstall(
     scope: localConfig.scope,
     dryRun: options.dryRun,
     previousPackages: previousLock?.packages,
+    declarationRoot: localConfig.repo.localPath,
   };
   const lock: PackageLock = {
     version: 1,
@@ -226,6 +239,8 @@ export async function pkgInstall(
       : {}),
     packages: previousLock?.packages ?? {},
   };
+  let skippedPackages = false;
+  let unavailableClient = false;
   if (!target) {
     if (localConfig.scope === 'user') {
       lock.declarationHash = sharedPackageDeclarationHash(manifest);
@@ -252,7 +267,11 @@ export async function pkgInstall(
     }
   }
   if (manifest.packages.claude && (!added || added.ecosystem === 'claude')) {
-    if (added?.marketplace && added.pluginName) {
+    if (options.installedOnly && (isAgentExcluded(localConfig, 'claude') || !await claude.detect(cwd))) {
+      skippedPackages = true;
+      unavailableClient ||= !isAgentExcluded(localConfig, 'claude');
+      log.info('Skipped Claude plugins: Claude is not enabled or its plugin CLI is unavailable.');
+    } else if (added?.marketplace && added.pluginName) {
       await claude.install({
         marketplaces: [added.marketplace],
         plugins: [{ name: added.pluginName }],
@@ -264,6 +283,18 @@ export async function pkgInstall(
       lock.packages.claude = await claude.install(manifest.packages.claude, context);
     }
   }
+  if (manifest.packages.codex && (!added || added.ecosystem === 'codex')) {
+    if (options.installedOnly && localConfig.scope !== 'user') {
+      skippedPackages = true;
+      log.info('Skipped Codex native plugins: they are user-wide. Install shared plugins from a user-scope team or use a separate CODEX_HOME.');
+    } else if (options.installedOnly && (isAgentExcluded(localConfig, 'codex') || !await codex.detect(cwd))) {
+      skippedPackages = true;
+      unavailableClient ||= !isAgentExcluded(localConfig, 'codex');
+      log.info('Skipped Codex plugins: Codex is not enabled or its plugin CLI is unavailable.');
+    } else {
+      lock.packages.codex = await codex.install(manifest.packages.codex, context);
+    }
+  }
 
   if (options.dryRun) {
     log.info('Dry run — no manifest or lockfile changes made');
@@ -273,8 +304,13 @@ export async function pkgInstall(
     await savePackageManifest(localConfig.repo.localPath, manifest);
     log.success(`Declared ${target} in teamai.yaml (${added?.ecosystem})`);
   }
+  if (unavailableClient) delete lock.declarationHash;
   await savePackageLock(lockDir, lock);
-  log.success('TeamAI packages installed; wrote teamai.lock');
+  if (skippedPackages) {
+    log.info('Package sync finished with the skips listed above; only installed package receipts are recorded.');
+  } else {
+    log.success('TeamAI packages installed; wrote teamai.lock');
+  }
 }
 
 export interface PackageDoctorReport {
@@ -304,17 +340,19 @@ export async function pkgDoctorReport(
 
   const npm = new NpmAdapter();
   const claude = new ClaudePluginAdapter();
+  const codex = new CodexPluginAdapter(undefined, resolveToolRootDir('codex', '.codex', localConfig.toolRoots));
   // doctor is read-only: it reads an older lock where it is, and the next install or session moves it.
   const previousLock = await loadPackageLock(await packageLockDir(localConfig, { readOnly: true }));
   const context: PackageInstallContext = {
     cwd,
     scope: localConfig.scope,
     previousPackages: previousLock?.packages,
+    declarationRoot: localConfig.repo.localPath,
   };
   const environment = await detectPackageEnvironment();
   const needsNpm = (manifest.packages.npm?.length ?? 0) > 0;
-  const needsClaudeMarketplaces = (manifest.packages.claude?.marketplaces.length ?? 0) > 0;
-  const needsClaudePlugins = (manifest.packages.claude?.plugins.length ?? 0) > 0;
+  const needsClaudeMarketplaces = !isAgentExcluded(localConfig, 'claude') && (manifest.packages.claude?.marketplaces.length ?? 0) > 0;
+  const needsClaudePlugins = !isAgentExcluded(localConfig, 'claude') && (manifest.packages.claude?.plugins.length ?? 0) > 0;
   const needsClaude = needsClaudeMarketplaces || needsClaudePlugins;
   const requiredEnvironment = environment.filter((item) =>
     (needsNpm && (item.name === 'Node' || item.name === 'npm'))
@@ -351,6 +389,24 @@ export async function pkgDoctorReport(
       lines.push(`  ${ok ? '✔' : '✖'} ${status.name.padEnd(42)} ${suffix}`);
       if (status.detail && status.installed) lines.push(`    → ${status.detail}`);
       if (!ok) allPassed = false;
+    }
+  }
+  if (manifest.packages.codex && !isAgentExcluded(localConfig, 'codex')) {
+    lines.push('', '  Packages (Codex native plugins)');
+    if (localConfig.scope !== 'user') {
+      lines.push('  - Not installed in workspace scope: Codex native plugins are user-wide.');
+    } else if (!await codex.detect(cwd)) {
+      lines.push('  ✖ Codex native plugin CLI unavailable');
+      allPassed = false;
+    } else {
+      for (const status of [
+        ...await codex.marketplaceStatus(manifest.packages.codex, context),
+        ...await codex.status(manifest.packages.codex, context),
+      ]) {
+        const ok = status.installed && status.enabled !== false;
+        lines.push(`  ${ok ? '✔' : '✖'} ${status.name} ${status.detail ?? status.version ?? ''}`);
+        if (!ok) allPassed = false;
+      }
     }
   }
   if (!allPassed) lines.push('    → Run `teamai packages`');

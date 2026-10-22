@@ -410,6 +410,8 @@ export const TeamaiConfigBaseSchema = z.object({
   provider: ProviderNameSchema.default('tgit'),
   /** Opt-in review uploads for a separate Git team repo. Never submits changes. */
   gerrit: GerritConfigSchema.optional(),
+  /** Opt-in short workspace init; the team chooses the ordinary member role. */
+  onboarding: z.object({ defaultRole: z.string().min(1) }).optional(),
   /**
    * @deprecated Ignored by `teamai init` (issue #250). Local install scope is
    * decided only by CLI `--scope` / default. Kept optional for old teamai.yaml files.
@@ -440,6 +442,8 @@ export const TeamaiConfigBaseSchema = z.object({
   /** Run `git submodule update --init` on pull so skills distributed as git
    * submodules are populated and kept current. Off by default. */
   submodules: z.boolean().optional(),
+  /** Apply declared packages after an explicit pull, never a background/session pull. */
+  packagesAutoApply: z.boolean().optional(),
   /**
    * Language of the agent-facing texts teamai injects: the built-in
    * teamai-recall rule, the todowrite-hint, and the mr-hint.
@@ -473,6 +477,14 @@ export const TeamaiConfigBaseSchema = z.object({
   // Tools left without `mcp` are skipped by MCP sync rather than guessed at, so a
   // wrong guess can never create a junk config file on a user's machine.
   toolPaths: z.record(z.string(), ToolPathsSchema).default({
+    // Current Kimi Code CLI discovers these paths and honors KIMI_CODE_HOME.
+    kimi: {
+      skills: '.kimi-code/skills',
+      agents: '.kimi-code/agents',
+      claudemd: '.kimi-code/AGENTS.md',
+      mcp: '.kimi-code/mcp.json',
+      mcpProject: '.kimi-code/mcp.json',
+    },
     claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md', agents: '.claude/agents', mcp: '.claude.json', mcpProject: '.mcp.json' },
     // Codex reads no rules directory: `.codex/rules` holds its exec-policy
     // `*.rules` files. In user scope teamai's blocks go to ~/.codex/AGENTS.md,
@@ -1432,6 +1444,8 @@ export interface GlobalOptions {
   registry?: string;
   npm?: boolean;
   claude?: boolean;
+  codex?: boolean;
+  installedOnly?: boolean;
   verbose?: boolean;
   silent?: boolean;
   /**
@@ -2420,6 +2434,7 @@ function isAddressableRootSegment(segment: string): boolean {
  * by that check.
  */
 export const RELOCATABLE_TOOLS: Readonly<Record<string, RelocatableTool>> = {
+  kimi: { label: 'Kimi Code CLI', envVar: 'KIMI_CODE_HOME', defaultRoot: '.kimi-code' },
   [CLAUDE_TOOL_ID]: { label: 'Claude Code', envVar: 'CLAUDE_CONFIG_DIR', defaultRoot: DEFAULT_CLAUDE_ROOT },
   [CODEX_TOOL_ID]: { label: 'Codex', envVar: 'CODEX_HOME', defaultRoot: DEFAULT_CODEX_ROOT },
   [CURSOR_DATA_TOOL_ID]: { label: 'Cursor transcripts', envVar: 'CURSOR_DATA_DIR', defaultRoot: DEFAULT_CURSOR_ROOT },

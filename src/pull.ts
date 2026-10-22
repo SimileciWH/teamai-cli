@@ -2845,7 +2845,7 @@ export async function pull(
    * Complete" webhook on those (#702 follow-up). Also false when any scope
    * failed to sync docs or held an agent for its model (#830).
    */
-  result?: { completed: boolean },
+  result?: { completed: boolean; delivery?: 'pending' | 'complete' | 'failed'; postPull?: import('./post-pull.js').PostPullOutcome },
 ): Promise<void> {
   if (options.teamRef !== undefined && options.dryRun) {
     const message = `--team-ref cannot be previewed: a dry run would show the workspace's current team revision, not "${options.teamRef}". Run teamai pull --team-ref ${options.teamRef} without --dry-run.`;
@@ -3276,6 +3276,27 @@ export async function pull(
     }
   }
 
+  // Apply declared packages only after successful explicit delivery, while clone locks are held.
+  if (!options.dryRun && !options.inline && !isBackgroundPull(options)
+      && syncResult.delivery !== 'failed'
+      && !syncResult.teamRepoFailed && !syncResult.docsSyncFailed && !syncResult.resourceSyncFailed
+      && !syncResult.agentModelsHeld && startupErrors.length === 0 && unwritten.length === 0) {
+    for (const owner of [reconcileUser, reconcileProject]) {
+      if (!owner) continue;
+      const config = await loadTeamConfig(owner.repo.localPath);
+      if (config?.packagesAutoApply) {
+        try {
+          const { pkgInstall } = await import('./pkg/commands.js');
+          await pkgInstall(undefined, { ...options, installedOnly: true }, owner);
+        } catch (error) {
+          syncResult.delivery = 'failed';
+          startupErrors.push(`Packages: ${(error as Error).message}`);
+          throw error;
+        }
+      }
+    }
+  }
+
   // Fetching alone is not success: every startup delivery stage must finish
   // before a hook retry, or the interactive pull that mentioned the failure,
   // may erase it. Preserve the more specific fetch/lock records those stages
@@ -3315,6 +3336,7 @@ export async function pull(
       }
     }
     if (result) result.completed = syncResult.completed && !syncResult.docsSyncFailed && !syncResult.agentModelsHeld;
+    if (result) result.delivery = syncResult.delivery;
     const releaseSyncLocks = async () => {
       for (const lock of heldLocks.values()) await releaseLock(lock);
     };
@@ -3342,10 +3364,11 @@ export async function pull(
   //    worktree, not this clone's tree. Launch shape: post-pull.ts. Nothing
   //    here can fail the pull.
   if (!options.dryRun && !options.inline && postPullRepo) {
-    await runDeclaredPostPull(postPullRepo, {
+    const outcome = await runDeclaredPostPull(postPullRepo, {
       interactive: options.interactive === true,
       localConfig: scriptOwner ?? undefined,
     });
+    if (result) result.postPull = outcome;
   }
 }
 

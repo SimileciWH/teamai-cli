@@ -7,10 +7,11 @@ export interface PackageInstallContext {
   scope: Scope;
   dryRun?: boolean;
   previousPackages?: PackageLock['packages'];
+  declarationRoot?: string;
 }
 
 export abstract class PackageAdapter<TDeclaration, TLockSection> {
-  abstract readonly ecosystem: 'npm' | 'claude';
+  abstract readonly ecosystem: 'npm' | 'claude' | 'codex';
 
   protected readonly execute: CommandExecutor;
 

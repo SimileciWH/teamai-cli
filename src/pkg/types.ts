@@ -42,15 +42,42 @@ export const ClaudeEcosystemSchema = z.object({
   plugins: z.array(ClaudePluginSpecSchema).default([]),
 }).strict();
 
+export const CodexEcosystemSchema = z.object({
+  marketplaces: z.array(ClaudeMarketplaceSchema.refine(item => !/^[\w.-]+\/[\w.-]+@/.test(item.repo), {
+    message: 'Use a separate ref field for a Codex marketplace, not owner/repo@ref',
+  })).default([]),
+  plugins: z.array(z.object({
+    name: z.string().regex(/^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+$/),
+    version: z.string().min(1).optional(),
+  }).strict()).default([]),
+}).strict();
+
 export const PackageSetSchema = z.object({
   npm: z.array(NpmSpecSchema).optional(),
   claude: ClaudeEcosystemSchema.optional(),
+  codex: CodexEcosystemSchema.optional(),
 }).strict();
 
 export const PackageManifestSchema = z.object({
   name: z.string().default(''),
   packages: PackageSetSchema.default({}),
 }).superRefine((manifest, ctx) => {
+  const codexNames = new Set<string>();
+  for (const [index, marketplace] of (manifest.packages.codex?.marketplaces ?? []).entries()) {
+    if (codexNames.has(marketplace.name)) ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['packages', 'codex', 'marketplaces', index, 'name'],
+      message: `duplicate Codex marketplace "${marketplace.name}"`,
+    });
+    codexNames.add(marketplace.name);
+  }
+  for (const [index, plugin] of (manifest.packages.codex?.plugins ?? []).entries()) {
+    if (!codexNames.has(plugin.name.split('@')[1])) ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['packages', 'codex', 'plugins', index, 'name'],
+      message: 'Codex plugin marketplace must be declared',
+    });
+  }
   const marketplaces = manifest.packages.claude?.marketplaces ?? [];
   const names = new Set<string>();
   for (const [index, marketplace] of marketplaces.entries()) {
@@ -87,6 +114,7 @@ export type NpmSpec = z.infer<typeof NpmSpecSchema>;
 export type ClaudeMarketplace = z.infer<typeof ClaudeMarketplaceSchema>;
 export type ClaudePluginSpec = z.infer<typeof ClaudePluginSpecSchema>;
 export type ClaudeEcosystem = z.infer<typeof ClaudeEcosystemSchema>;
+export type CodexEcosystem = z.infer<typeof CodexEcosystemSchema>;
 export type PackageSet = z.infer<typeof PackageSetSchema>;
 export type PackageManifest = z.infer<typeof PackageManifestSchema>;
 
@@ -125,6 +153,10 @@ export const PackageLockSchema = z.object({
   packages: z.object({
     npm: z.array(NpmLockEntrySchema).optional(),
     claude: z.object({
+      marketplaces: z.array(ClaudeMarketplaceLockSchema).default([]),
+      plugins: z.array(ClaudePluginLockSchema).default([]),
+    }).optional(),
+    codex: z.object({
       marketplaces: z.array(ClaudeMarketplaceLockSchema).default([]),
       plugins: z.array(ClaudePluginLockSchema).default([]),
     }).optional(),

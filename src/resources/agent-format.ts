@@ -6,9 +6,10 @@ import { getDispatchCommand } from '../builtin-hooks.js';
 
 // ─── Tool name type ──────────────────────────────────────────────────────────
 
-export type ToolName = 'claude' | 'claude-internal' | 'tclaude' | 'codebuddy' | 'codex' | 'codex-internal' | 'tcodex' | 'cursor' | 'copilot' | 'joycode' | 'qoder' | 'qoder-cn' | 'kiro' | 'zcode' | 'omp' | 'opencode' | 'workbuddy' | 'muse';
+export type ToolName = 'claude' | 'claude-internal' | 'tclaude' | 'codebuddy' | 'codex' | 'codex-internal' | 'tcodex' | 'cursor' | 'copilot' | 'joycode' | 'qoder' | 'qoder-cn' | 'kiro' | 'zcode' | 'omp' | 'opencode' | 'workbuddy' | 'muse' | 'kimi';
 
 export const ALL_SUPPORTED_TOOLS: ToolName[] = [
+  'kimi',
   'claude',
   'claude-internal',
   'tclaude',
@@ -89,6 +90,7 @@ export interface AgentSpec {
    * and collected when reversing from a tool's native format.
    */
   tool_extras?: {
+    kimi?: Record<string, unknown>;
     claude?: Record<string, unknown>;
     'claude-internal'?: Record<string, unknown>;
     tclaude?: Record<string, unknown>;
@@ -1031,6 +1033,12 @@ export function renderForTool(spec: AgentSpec, tool: ToolName, resolved?: Resolv
     case 'claude-internal':
     case 'tclaude':
       return { ext, content: renderMarkdownAgent(target, toolExtrasFor(spec, tool), fields) };
+    case 'kimi': {
+      const extras = Object.fromEntries(Object.entries(spec.tool_extras?.kimi ?? {})
+        .filter(([key]) => ['whenToUse', 'override', 'disallowedTools', 'subagents'].includes(key)));
+      return { ext, content: renderMarkdownAgent(withModel(target, undefined), extras,
+        spec.tools === undefined ? undefined : { tools: spec.tools }) };
+    }
     case 'codex':
     case 'codex-internal':
     case 'tcodex':

@@ -127,6 +127,7 @@ const codebuddyProjectRule = (paths: ToolPaths): string | undefined =>
 
 // One line per tool, so a change to one tool's target edits one line.
 const USER_TARGETS: Readonly<Record<string, TargetEntry>> = {
+  kimi: { file: configured, teamRules: { label: 'Kimi Code AGENTS.md' }, retired: [] },
   claude: { file: configured, retired: [] },
   // Cursor reads ~/.cursor/rules only in a workspace under $HOME; elsewhere its session-start hook adds the blocks (cursor-user-rules.ts).
   cursor: cursorUser,
@@ -163,6 +164,7 @@ const USER_TARGETS: Readonly<Record<string, TargetEntry>> = {
 };
 
 const PROJECT_TARGETS: Readonly<Record<string, TargetEntry>> = {
+  kimi: { file: configured, teamRules: { label: 'Kimi Code project AGENTS.md' }, retired: [] },
   // Claude loads every unscoped .claude/rules file from the root and any
   // subdirectory, and still reads AGENTS.md and an authored CLAUDE.md as it
   // chose to. CLAUDE.local.md would stop the native AGENTS.md load (#945).
@@ -516,8 +518,9 @@ export function readsTeamRulesFromFile(tool: string): boolean {
  * uninstall all ask here.
  */
 export async function userRulesFile(tool: string, paths: ToolPaths, localConfig: LocalConfig): Promise<UserRulesFile | undefined> {
-  if (localConfig.scope !== 'user') return undefined;
-  const entry = entryFor(tool, 'user');
+  // Kimi also reads a dedicated project file; other clients retain their existing channels.
+  if (localConfig.scope !== 'user' && tool !== 'kimi') return undefined;
+  const entry = entryFor(tool, localConfig.scope);
   if (entry?.teamRules === undefined) return undefined;
   const { label } = entry.teamRules;
   if (tool === 'openclaw') {

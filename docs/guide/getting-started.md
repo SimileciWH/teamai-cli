@@ -58,6 +58,21 @@ You need the repo URL.
 
 Day-to-day commands are in the [Member Guide](./member-guide.md). Searching what teammates learned is in [Team Context](./knowledge.md).
 
+### Short workspace setup
+
+A team can enable `teamai init <repo-url>` without role, project or tool questions by adding this to `teamai.yaml`:
+
+```yaml
+onboarding:
+  defaultRole: rd
+```
+
+The role must exist in `manifest/roles.yaml`. In `manifest/projects.yaml`, give each project a `repositories` list of exact source Git URLs. Declare SSH and HTTPS aliases separately; matching preserves the host, transport, non-default port and repository path. The checkout name and branch name are not used. No match or multiple matches stops setup before a binding is saved. Explicit `--role`, `--project` and `--agent` remain available.
+
+From a source checkout, the member runs only `teamai init <repo-url>`. Workspace scope remains the default. The CLI detects **OpenCode, Pi, Codex, Kimi and Claude Code** on PATH, enables the installed tools, and skips the rest without installing them. It performs the initial pull and waits for the team's post-pull step, then summarizes the binding, configured tools, skipped tools and sync outcome. A missing, failed or unfinished declared post-pull step is not reported as ready. With no supported tool, only the binding is saved with an empty tool allowlist.
+
+Repeating the short command against the same binding preserves its role, project choices and disabled tools while detecting newly installed supported clients. The normal later update is `teamai pull`. This opt-in does not change user-scope or single-repo setup, or teams without `onboarding`. Global client resources may still be visible inside a workspace; this is not a client security boundary.
+
 ### Share with the team
 
 You have a skill, rule, agent, or MCP server that teammates should have.

@@ -991,7 +991,6 @@ export class RulesHandler extends ResourceHandler {
   ): Promise<void> {
     if (localConfig.scope !== 'user') {
       await this.removeStaleProjectSoulRules(localConfig);
-      return;
     }
     // Hermes: inline all team rules into a teamai-managed block in SOUL.md
     // (user-level standing instructions). Only when Hermes is actually
@@ -999,7 +998,7 @@ export class RulesHandler extends ResourceHandler {
     // is global, so only a user-scope pull writes it; Hermes gets no project
     // rules (see `ruleChannelNotes`, #946). Here, so the "Already synced" pull
     // repairs a block an older project pull overwrote.
-    if (!isAgentExcluded(localConfig, 'hermes')) {
+    if (localConfig.scope === 'user' && !isAgentExcluded(localConfig, 'hermes')) {
       const { getHermesHome } = await import('../hermes-home.js');
       if (await pathExists(getHermesHome())) {
         const { getHermesSoulPath, upsertSoulRules } = await import('../hermes-config.js');
@@ -1013,6 +1012,7 @@ export class RulesHandler extends ResourceHandler {
     }
     const block = await teamRulesBlock(rules);
     for (const [tool, toolPath] of Object.entries(scopedToolPaths(teamConfig, localConfig))) {
+      if (localConfig.scope !== 'user' && tool !== 'kimi') continue;
       // One tool's failure leaves the others' files to be written.
       let file: string | undefined;
       let writing = false;

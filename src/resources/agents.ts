@@ -1820,6 +1820,7 @@ function reverseByTool(tool: ToolName, filePath: string, content: string): Rever
 
 function reverseByParser(tool: ToolName, filePath: string, content: string): ReverseResult {
   switch (tool) {
+    case 'kimi':
     case 'claude':
     case 'claude-internal':
     case 'tclaude':

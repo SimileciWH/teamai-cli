@@ -275,6 +275,18 @@ packages:
 
 pull 之后跑 `teamai packages`。
 
+### Codex 原生插件与显式 pull
+
+内部 fork 新增 `packages.codex`，包含 `marketplaces`（`name`、`repo`、可选 `ref`）和 `plugins`（`name: 插件@市场`、可选 `version`）。`repo: .` 相对团队资料仓解析，不相对当前代码项目。Git 市场通过原生命令刷新；变更 pin 要有匹配的前次 TeamAI 安装记录，同名但不同来源的个人市场不覆盖。
+
+配置 `packagesAutoApply: true` 后，显式 `teamai pull` 在资料成功同步后应用声明的包；遵守已启用客户端选择，后台、inline、dry-run 不安装插件。已启用客户端暂不可用时，不把声明记录为已完成。`teamai packages --codex 插件@市场` 可以向已声明的市场添加插件。安装和版本检查都使用记录的 Codex 根目录。原生插件只支持 user scope；workspace 自动同步会明确跳过，不改全局插件。
+
+### Kimi Code 与同机多团队
+
+`--agent kimi` 接入当前 Kimi Code CLI：用户资源在 `~/.kimi-code` 或已记录的 `KIMI_CODE_HOME`，项目资源在 `.kimi-code`。支持 Skills、Markdown agents、AGENTS.md 托管区块和 MCP JSON。保留个人说明，Agent 显式空工具白名单不会被改成全部允许。尚未实现 Kimi 原生插件安装，不把模型支持等同于客户端适配。
+
+用户级绑定放公共资源；每个项目在自己的目录执行 `init <资料仓> --scope workspace` 绑定团队资源。`inheritUserScope` 只控制 TeamAI 同步，不控制 AI 客户端是否读取已安装的全局资源。全局插件版本冲突时，使用独立客户端配置或先统一版本。
+
 ## Docs（文档）
 
 把文件放进团队仓库的 `docs/`，提交后成员 `pull` 时同步。某个目录只给一部分人时，在 `resources.docs` 里声明：

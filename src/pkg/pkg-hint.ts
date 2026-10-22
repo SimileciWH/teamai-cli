@@ -22,10 +22,12 @@ export function buildPackageHintMessage(
   npmCount: number,
   claudeCount: number,
   marketplaceCount = 0,
+  codexCount = 0,
 ): string {
   const summary = [
     npmCount > 0 ? `${npmCount} npm package${npmCount === 1 ? '' : 's'}` : '',
     claudeCount > 0 ? `${claudeCount} Claude plugin${claudeCount === 1 ? '' : 's'}` : '',
+    codexCount > 0 ? `${codexCount} Codex resource${codexCount === 1 ? '' : 's'}` : '',
     marketplaceCount > 0
       ? `${marketplaceCount} Claude marketplace${marketplaceCount === 1 ? '' : 's'}`
       : '',
@@ -84,6 +86,7 @@ async function computePackageHintState(cwd: string): Promise<PackageHintState | 
       manifest.packages.npm?.length ?? 0,
       manifest.packages.claude?.plugins.length ?? 0,
       manifest.packages.claude?.marketplaces.length ?? 0,
+      (manifest.packages.codex?.plugins.length ?? 0) + (manifest.packages.codex?.marketplaces.length ?? 0),
     ),
   };
 }

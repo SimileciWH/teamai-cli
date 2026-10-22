@@ -59,6 +59,8 @@ const ProjectSchema = z.object({
   }),
   name: z.string().default(''),
   description: z.string().default(''),
+  /** Exact source remotes used by short workspace init, never directory names. */
+  repositories: z.array(z.string().min(1)).optional(),
   resources: ProjectResourceNamespacesSchema,
 });
 

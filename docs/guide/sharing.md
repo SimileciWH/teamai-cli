@@ -275,6 +275,18 @@ packages:
 
 After pull, run `teamai packages`.
 
+### Codex native plugins and explicit pull
+
+The internal fork also supports `packages.codex`, with `marketplaces` (`name`, `repo`, optional `ref`) and `plugins` (`name: plugin@marketplace`, optional `version`). A local `repo: .` resolves against the team resource clone, not the current code project. Git marketplaces refresh through the native CLI; changed pins require a matching previous TeamAI receipt. A conflicting personal marketplace is not replaced.
+
+Set `packagesAutoApply: true` to apply declared packages after a successful explicit `teamai pull`. It honors the enabled client selection; background, inline and dry-run pulls do not install plugins. A temporarily unavailable enabled client stays unacknowledged. `teamai packages --codex plugin@marketplace` adds a plugin to an already-declared marketplace. Codex writes and version checks use the recorded Codex home. Native plugins require user scope: workspace auto-apply reports a skip without changing global plugins.
+
+### Kimi Code and multiple teams
+
+`--agent kimi` supports the current Kimi Code CLI: user resources under `~/.kimi-code` (or recorded `KIMI_CODE_HOME`), project resources under `.kimi-code`. Skills, Markdown agents, `AGENTS.md` managed blocks and MCP JSON are supported. Personal instructions are preserved; an explicit empty agent tool allowlist stays empty. Native Kimi plugin installation is not implemented.
+
+Use one user scope for shared resources, and `init <repo> --scope workspace` in each project's directory for team-specific resources. `inheritUserScope` controls TeamAI synchronization, not what the AI client itself loads from its global directories. Conflicting global plugin versions need separate client profiles or an agreed common version.
+
 ## Docs
 
 Put files in the team repo's `docs/`. Members receive them on `pull`. To limit a directory, declare it under `resources.docs`:

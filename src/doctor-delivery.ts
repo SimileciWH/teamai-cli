@@ -767,7 +767,7 @@ async function buildProjectRulesHookChecks(ctx: DoctorContext): Promise<Check[]>
  */
 async function buildUserRulesFileChecks(ctx: DoctorContext, items: ResourceItem[]): Promise<Check[]> {
   const { localConfig, teamConfig } = ctx;
-  if (!teamConfig || localConfig.scope !== 'user') return [];
+  if (!teamConfig) return [];
 
   const { teamRulesBlock } = await import('./resources/rules.js');
   const { isCodexTool } = await import('./utils/tool-names.js');

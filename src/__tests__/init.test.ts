@@ -1623,6 +1623,26 @@ describe('init --provider', () => {
     expect(saveLocalConfig).toHaveBeenCalledWith(expect.not.objectContaining({ provider: expect.anything() }));
   });
 
+  it.each(['user', 'project'] as const)('keeps provider detection for legacy %s re-init', async (scope) => {
+    vi.stubEnv('GITLAB_URL', 'https://gitlab.example.test');
+    const { loadTeamConfig } = await import('../config.js');
+    vi.mocked(loadLocalConfigForScope).mockResolvedValueOnce({
+      repo: { localPath, remote: GITLAB_REPO }, provider: 'git',
+      username: 'plain-member', additionalRoles: [], scope,
+    });
+    vi.mocked(loadTeamConfig).mockResolvedValue({
+      ...(TEAM_CONFIG as object),
+      ...(scope === 'user' ? { onboarding: { defaultRole: 'hai' } } : {}),
+    } as never);
+    const reachedDetectedProvider = new Error('Detected GitLab provider');
+    spies.push(vi.spyOn(GitLabProvider.prototype, 'ensureInstalled')
+      .mockRejectedValue(reachedDetectedProvider));
+
+    await expect(init({ repo: GITLAB_REPO, scope, force: true }))
+      .rejects.toBe(reachedDetectedProvider);
+    expect(GenericGitProvider.prototype.cloneRepo).not.toHaveBeenCalled();
+  });
+
   it('applies to single-repo mode as well', async () => {
     vi.stubEnv('GITLAB_URL', 'https://gitlab.example.test');
     pathExistsFn = (p: string) => p.endsWith(`${path.sep}.git`) || p.endsWith('/.git');

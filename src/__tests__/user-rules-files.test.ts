@@ -81,6 +81,7 @@ let repoPath: string;
 
 /** Each tool with no rules format, the home dir that says it is installed, and the file only it reads. */
 const TOOLS: ReadonlyArray<{ tool: string; root: string; file: string }> = [
+  { tool: 'kimi', root: '.kimi-code', file: '.kimi-code/AGENTS.md' },
   { tool: 'zcode', root: '.zcode', file: '.zcode/AGENTS.md' },
   { tool: 'dsh', root: '.dsh', file: '.dsh/AGENTS.md' },
   { tool: 'openclaw', root: '.openclaw/workspace', file: '.openclaw/workspace/AGENTS.md' },
@@ -128,6 +129,23 @@ afterEach(async () => {
 });
 
 describe('a user-scope rules sync puts the team rules in a file only the tool reads (#946)', () => {
+  it('keeps Kimi team A and team B project rules separate and preserves global notes', async () => {
+    const first = config('project', ['kimi']);
+    const secondRoot = path.join(tmpDir, 'project-b');
+    const second = { ...first, projectRoot: secondRoot };
+    await fse.outputFile(path.join(projectRoot, '.kimi-code/AGENTS.md'), 'Project A notes\n');
+    await fse.outputFile(path.join(secondRoot, '.kimi-code/AGENTS.md'), 'Project B notes\n');
+    await fse.outputFile(home('.kimi-code/AGENTS.md'), 'Global notes\n');
+    const handler = new RulesHandler();
+    await handler.pullAllRules(teamConfig(), first);
+    await fse.writeFile(path.join(repoPath, 'rules/codeword.md'), 'Team B codeword is HERON-7.\n');
+    await handler.pullAllRules(teamConfig(), second);
+    expect(await fse.readFile(path.join(projectRoot, '.kimi-code/AGENTS.md'), 'utf8')).toContain('PELICAN-42');
+    expect(await fse.readFile(path.join(projectRoot, '.kimi-code/AGENTS.md'), 'utf8')).not.toContain('HERON-7');
+    expect(await fse.readFile(path.join(secondRoot, '.kimi-code/AGENTS.md'), 'utf8')).toContain('HERON-7');
+    expect(await fse.readFile(home('.kimi-code/AGENTS.md'), 'utf8')).toBe('Global notes\n');
+  });
+
   it.each(TOOLS)('writes the team-rules block for $tool to ~/$file, beside the member\'s text', async ({ tool, root, file }) => {
     await fse.ensureDir(home(root));
     await fse.writeFile(home(file), '# My notes\n');
@@ -445,6 +463,7 @@ describe('uninstall reclaims the same legacy copies (#946)', () => {
 
 describe('doctor checks the block in the file each tool reads (#946)', () => {
   const NAMES: Record<string, string> = {
+    kimi: 'Team rules are inlined in Kimi Code AGENTS.md',
     zcode: 'Team rules are inlined in ZCode AGENTS.md',
     dsh: 'Team rules are inlined in DeepSeek Harness AGENTS.md',
     openclaw: 'Team rules are inlined in OpenClaw workspace AGENTS.md',

@@ -58,6 +58,21 @@
 
 日常命令见[成员使用](./member-guide.md)。检索同事记下的经验，看[团队上下文](./knowledge.md)。
 
+### 一行接入项目
+
+管理员在 `teamai.yaml` 加入以下配置后，RD 只需 `teamai init <资源仓地址>`，不用再选择角色、项目和工具：
+
+```yaml
+onboarding:
+  defaultRole: rd
+```
+
+`rd` 必须存在于 `manifest/roles.yaml`。管理员还需在 `manifest/projects.yaml` 的各项目下填写 `repositories`，列出对应源码 Git 地址。SSH、HTTPS 地址分别登记；匹配保留主机、协议、非默认端口和仓库路径，不看目录名或分支名。无法匹配或匹配多个项目时停止，不保存错误绑定。维护者仍可显式使用 `--role`、`--project`、`--agent`。
+
+RD 在代码目录执行短命令，默认绑定工作区。CLI 检测 PATH 中的 **OpenCode、Pi、Codex、Kimi、Claude Code**，已安装的接入，未安装的跳过，不自动安装客户端。随后立即同步资源、等待团队的 `postPull` 步骤，最后汇总项目、角色、接入工具、跳过项和同步结果。声明的脚本缺失、失败或仍未结束时，不显示已完成。五个工具都没安装时，只保存绑定和空工具白名单。
+
+同一绑定重复运行短命令，会保留原角色、项目选择及禁用工具，并检测新增客户端；日常更新仍用 `teamai pull`。没有启用 `onboarding` 的团队、用户级安装和单仓库模式沿用原流程。AI 客户端仍可能读取已有全局资源，工作区绑定不等于客户端安全隔离。
+
 ### 分享给团队
 
 你本地有一个 skill、rule、agent 或 MCP server，同事也要用。

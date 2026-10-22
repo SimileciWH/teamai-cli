@@ -501,6 +501,8 @@ function entrySource(aliases: ModelAliases & { ok: true }, alias: string, tool: 
 
 /** What `tool` receives for `spec`'s model. */
 export function resolveAgentModel(aliases: ModelAliases, spec: AgentSpec, tool: ToolName): ModelResolution {
+  // Kimi's agent format has no model field; unrelated aliases must not hold its delivery.
+  if (tool === 'kimi') return { ok: true, step: 'default' };
   const extras = toolExtrasFor(spec, tool);
   const extrasModel = extras?.['model'];
   if (extrasModel !== undefined) {

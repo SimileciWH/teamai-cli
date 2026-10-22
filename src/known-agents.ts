@@ -22,7 +22,7 @@ import { getUserHome } from './utils/home.js';
  * against the user's HOME in non-interactive contexts. Order is the display order.
  * Kept small on purpose — the common coding agents, not the full KNOWN_AGENTS list.
  */
-export const SELF_MODE_AGENT_CHOICES = ['claude', 'codex', 'cursor', 'copilot', 'pi', 'joycode', 'codebuddy', 'workbuddy', 'muse'] as const;
+export const SELF_MODE_AGENT_CHOICES = ['claude', 'codex', 'kimi', 'cursor', 'copilot', 'pi', 'joycode', 'codebuddy', 'workbuddy', 'muse'] as const;
 
 /**
  * Normalize the `--agent` option into a deduplicated id list.
@@ -80,6 +80,7 @@ export interface KnownAgent {
  * additional skills-manage entries we don't yet ship in toolPaths.
  */
 export const KNOWN_AGENTS: KnownAgent[] = [
+  { id: 'kimi', displayName: 'Kimi Code CLI', category: 'coding', skillsPath: '.kimi-code/skills' },
   // Coding agents already wired through teamConfig.toolPaths defaults
   { id: 'claude', displayName: 'Claude Code', category: 'coding', skillsPath: '.claude/skills' },
   { id: 'claude-internal', displayName: 'Claude Code Internal', category: 'coding', skillsPath: '.claude-internal/skills' },

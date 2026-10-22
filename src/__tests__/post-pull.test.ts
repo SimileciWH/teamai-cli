@@ -111,7 +111,7 @@ describe('runPostPull (in-process)', () => {
   it('launches with the repo cwd/env and default budget, and records a clean exit', async () => {
     mockSpawn.mockImplementationOnce(() => fakeScript(0) as never);
 
-    await runPostPull(path.join(dir, 'ok.mjs'), dir);
+    await expect(runPostPull(path.join(dir, 'ok.mjs'), dir)).resolves.toBe('complete');
 
     const [command, args, options] = mockSpawn.mock.calls.at(-1)!;
     expect(command).toBe(process.execPath);
@@ -142,7 +142,7 @@ describe('runPostPull (in-process)', () => {
   it('records a non-zero exit together with the output tail', async () => {
     mockSpawn.mockImplementationOnce(() => fakeScript(3, 'boom: missing config\n') as never);
 
-    await runPostPull(path.join(dir, 'fail.mjs'), dir, 30);
+    await expect(runPostPull(path.join(dir, 'fail.mjs'), dir, 30)).resolves.toBe('failed');
 
     expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('postPull: exited 3 in'));
     expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('boom: missing config'));
@@ -162,7 +162,7 @@ describe('runPostPull (in-process)', () => {
        setTimeout(() => fs.writeFileSync(${JSON.stringify(marker)}, 'alive'), 120);`,
     );
 
-    await runPostPull(path.join(dir, 'hang.mjs'), dir, 0.05);
+    await expect(runPostPull(path.join(dir, 'hang.mjs'), dir, 0.05)).resolves.toBe('pending');
     expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('postPull: timed out after 0.05s — orphaned'));
 
     await vi.waitUntil(() => fs.existsSync(marker), { timeout: 10_000, interval: 25 });
@@ -177,7 +177,7 @@ describe('runDeclaredPostPull', () => {
 
   it('skips when the declared script is missing', async () => {
     mockLoadTeamConfig.mockResolvedValue(teamConfig({ path: 'missing.mjs' }));
-    await runDeclaredPostPull(dir);
+    await expect(runDeclaredPostPull(dir)).resolves.toBe('pending');
     expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('declared script not found'));
   });
 
@@ -201,7 +201,7 @@ describe('runDeclaredPostPull', () => {
     fs.writeFileSync(outside, 'export {};\n', 'utf8');
     mockLoadTeamConfig.mockResolvedValue(teamConfig({ path: `../${outsideName}` }));
 
-    await expect(runDeclaredPostPull(dir)).resolves.toBeUndefined();
+    await expect(runDeclaredPostPull(dir)).resolves.toBe('failed');
     expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('postPull: skipped'));
     fs.rmSync(outside, { force: true });
   });
@@ -212,7 +212,7 @@ describe('runDeclaredPostPull', () => {
 
     if (trySymlink(outside, path.join(dir, 'link.mjs'))) {
       mockLoadTeamConfig.mockResolvedValue(teamConfig({ path: 'link.mjs' }));
-      await expect(runDeclaredPostPull(dir)).resolves.toBeUndefined();
+      await expect(runDeclaredPostPull(dir)).resolves.toBe('failed');
       expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('postPull: skipped'));
     }
 

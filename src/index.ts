@@ -151,13 +151,13 @@ program
   .option('--scope <scope>', 'Install scope: workspace (default, <cwd>/.teamai + <cwd>/.claude) or user (~/.teamai + ~/.claude); project is the older name for workspace')
   .option('--inherit-user-scope', 'In workspace scope, also sync safe user-scope resources, load its env variables (not its secrets) in the workspace, and search its knowledge')
   .option('--no-inherit-user-scope', 'Disable user-scope inheritance for this workspace')
-  .option('--role <id>', 'Primary role ID (e.g. hai_dev) for non-interactive setup')
-  .option('--project <ids>', 'Active logical project(s) from manifest/projects.yaml (comma-separated); scopes which project resources and learnings this directory syncs. Pass "all" to activate every project the manifest declares (a snapshot taken now)')
+  .option('--role <id>', 'Primary role ID; overrides onboarding.defaultRole when the team enables short workspace init')
+  .option('--project <ids>', 'Active logical project(s) from manifest/projects.yaml (comma-separated). Overrides source-remote matching during short workspace init. Pass "all" for every declared project (a snapshot taken now)')
   // Non-variadic + a collecting coercer: repeatable (`--agent a --agent b`) and
   // comma-separated (`--agent a,b`, split later by normalizeAgentList) both work,
   // WITHOUT the greedy `<name...>` variadic that would swallow the `[repo]`
   // positional (e.g. `init --agent claude .` must keep `.` as the repo arg).
-  .option('--agent <name>', 'AI tools to set up (e.g. claude, codex, cursor, codebuddy, workbuddy, dsh). Repeatable or comma-separated. In single-repo mode, selects which tool dirs to create; a custom agent defined only in teamai.yaml\'s toolPaths also gets its root created here (git-backed init only — an HTTP init has no local teamai.yaml to read custom paths from). Omit for an interactive picker. Additive on repeated runs.', (val: string, acc: string[]) => acc.concat(val), [] as string[])
+  .option('--agent <name>', 'AI tools to set up. Repeatable or comma-separated. Short workspace init auto-detects installed opencode, pi, codex, kimi and claude; otherwise omission opens the picker. Explicit selection is additive on repeated runs. Custom toolPaths roots are supported for Git-backed init.', (val: string, acc: string[]) => acc.concat(val), [] as string[])
   .option('--force', 'Overwrite existing config without confirmation')
   .action(async (repoArg, cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;

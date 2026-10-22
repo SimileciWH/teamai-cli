@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   claudeSnapshot: vi.fn(),
   claudeStatus: vi.fn(),
   claudeMarketplaceStatus: vi.fn(),
+  codexDetect: vi.fn(),
+  codexInstall: vi.fn(),
   detectPackageEnvironment: vi.fn(),
   registeredMarketplaces: vi.fn(),
   assertNotReadOnly: vi.fn(),
@@ -61,6 +63,13 @@ vi.mock('../pkg/adapters/claude-plugin.js', () => ({
 
 vi.mock('../pkg/env-detect.js', () => ({
   detectPackageEnvironment: mocks.detectPackageEnvironment,
+}));
+
+vi.mock('../pkg/adapters/codex-plugin.js', () => ({
+  CodexPluginAdapter: class {
+    detect = mocks.codexDetect;
+    install = mocks.codexInstall;
+  },
 }));
 
 import { pkgDoctorReport, pkgInstall } from '../pkg/commands.js';
@@ -118,6 +127,8 @@ describe('pkgInstall npm target options', () => {
     }]);
     mocks.claudeInstall.mockResolvedValue({ marketplaces: [], plugins: [] });
     mocks.claudeSnapshot.mockResolvedValue({ marketplaces: [], plugins: [] });
+    mocks.codexDetect.mockResolvedValue(true);
+    mocks.codexInstall.mockResolvedValue({ marketplaces: [], plugins: [] });
     mocks.npmStatus.mockResolvedValue([]);
     mocks.claudeStatus.mockResolvedValue([]);
     mocks.claudeMarketplaceStatus.mockResolvedValue([]);
@@ -249,6 +260,27 @@ describe('pkgInstall npm target options', () => {
     await expect(pkgInstall(undefined, { global: true }))
       .rejects.toThrow('require a package target');
     expect(mocks.npmInstall).not.toHaveBeenCalled();
+  });
+
+  it('honors enabled clients and does not install user-wide Codex plugins for a workspace', async () => {
+    fs.writeFileSync(path.join(teamRepo, 'teamai.yaml'), YAML.stringify({ packages: { codex: {
+      marketplaces: [{ name: 'team', repo: '.' }], plugins: [{ name: 'test@team' }],
+    } } }));
+    const user = { ...(await mocks.autoDetectInit()).localConfig, scope: 'user', enabledAgents: ['kimi'] };
+    await pkgInstall(undefined, { installedOnly: true }, user);
+    await pkgInstall(undefined, { installedOnly: true });
+    expect(mocks.codexInstall).not.toHaveBeenCalled();
+  });
+
+  it('does not acknowledge an enabled client that is temporarily unavailable', async () => {
+    fs.writeFileSync(path.join(teamRepo, 'teamai.yaml'), YAML.stringify({ packages: { codex: {
+      marketplaces: [{ name: 'team', repo: '.' }], plugins: [{ name: 'test@team' }],
+    } } }));
+    const user = { ...(await mocks.autoDetectInit()).localConfig, scope: 'user', enabledAgents: ['codex'] };
+    mocks.codexDetect.mockResolvedValue(false);
+    await pkgInstall(undefined, { installedOnly: true }, user);
+    expect((await loadPackageLock(path.join(userHome, '.teamai')))?.declarationHash).toBeUndefined();
+    expect(mocks.codexInstall).not.toHaveBeenCalled();
   });
 
   it('fails closed for an ambiguous unregistered plugin-or-npm target', async () => {

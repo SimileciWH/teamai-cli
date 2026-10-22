@@ -9,7 +9,9 @@ function addInstallOptions(cmd: Command): Command {
     .option('-g, --global', 'Install an npm target globally (for CLI tools)')
     .option('--registry <url>', 'Use a specific npm registry for this target')
     .option('--npm', 'Treat an ambiguous target as an npm package')
-    .option('--claude', 'Treat the target as a Claude plugin');
+    .option('--claude', 'Treat the target as a Claude plugin')
+    .option('--codex', 'Treat the target as a Codex native plugin from a declared marketplace')
+    .option('--installed-only', 'Skip plugin ecosystems whose client is unavailable or disabled');
 }
 
 /**
@@ -39,7 +41,7 @@ export function registerPackagesCommand(
   const packagesCmd = addInstallOptions(
     program
       .command('packages [target]')
-      .description('Install team npm packages and Claude plugins declared in teamai.yaml'),
+      .description('Install team npm packages, Claude and Codex plugins declared in teamai.yaml'),
   ).action(async (target: string | undefined, _opts, command: Command) => {
     // Default action: install (equivalent to `teamai packages install`).
     await invoke(target, command);
@@ -48,7 +50,7 @@ export function registerPackagesCommand(
   addInstallOptions(
     packagesCmd
       .command('install [target]')
-      .description('Install team npm packages and Claude plugins declared in teamai.yaml'),
+      .description('Install team npm packages, Claude and Codex plugins declared in teamai.yaml'),
   ).action(async (target: string | undefined, _opts, command: Command) => {
     await invoke(target, command);
   });
