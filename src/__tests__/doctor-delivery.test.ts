@@ -118,6 +118,27 @@ describe('doctor — skills delivered on disk', () => {
     // Not a plain `teamai pull`: this check is printed at the end of one, and a
     // scope whose team repo has not moved is skipped, so it cannot restore this.
     expect(check.fix).toContain('teamai pull --force');
+    expect(check.warning).not.toBe(true);
+  });
+
+  it('warns about a readable personal skill but still fails missing or broken skills', async () => {
+    await deliver(CLAUDE_SKILLS, 'alpha');
+    await deliver(CLAUDE_SKILLS, 'beta');
+    const personal = path.join(homeDir, ...CLAUDE_SKILLS, 'alpha', 'SKILL.md');
+    await fse.appendFile(personal, '\nPersonal instructions.\n');
+    const preserved = await deliveryCheck();
+    expect(await preserved.check()).toBe(false);
+    expect(preserved.warning).toBe(true);
+    expect(preserved.fix).toContain('kept by pull');
+
+    await fse.remove(path.join(homeDir, ...CLAUDE_SKILLS, 'beta'));
+    expect((await deliveryCheck()).warning).not.toBe(true);
+
+    await deliver(CLAUDE_SKILLS, 'beta');
+    await fse.writeFile(personal, 'Invalid skill without frontmatter');
+    const broken = await deliveryCheck();
+    expect(await broken.check()).toBe(false);
+    expect(broken.warning).not.toBe(true);
   });
 
   it('counts the rest rather than printing every name', async () => {

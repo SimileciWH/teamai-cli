@@ -17,7 +17,7 @@ const CLAUDE_AGENT_MD = '---\nname: reviewer\ndescription: reviews\n---\nReview.
 // real newline instead of smol-toml's `\n` escape.
 const CODEX_AGENT_TOML = 'name = "reviewer"\ndescription = "reviews"\ndeveloper_instructions = \'\'\'\nReview.\n\'\'\'\n';
 
-interface CheckResult { name: string; ok: boolean; fix?: string }
+interface CheckResult { name: string; ok: boolean; fix?: string; warning?: boolean }
 interface DoctorReport { ok: boolean; checks: CheckResult[] }
 
 /**
@@ -38,7 +38,9 @@ describe('teamai doctor delivery checks (e2e)', () => {
       env: { ...process.env, HOME: home, USERPROFILE: home, SHELL: '/bin/bash', FORCE_COLOR: '0' },
       encoding: 'utf8',
     });
-    return JSON.parse(result.stdout) as DoctorReport;
+    const report = JSON.parse(result.stdout) as DoctorReport;
+    expect(result.status).toBe(report.ok ? 0 : 1);
+    return report;
   }
 
   function check(report: DoctorReport, name: string): CheckResult {
@@ -224,11 +226,28 @@ describe('teamai doctor delivery checks (e2e)', () => {
       mcpServers: { jira: { type: 'stdio', command: 'my-own-jira' } },
     }));
 
-    const mcp = check(runDoctor(), 'MCP servers delivered to claude');
+    const personalSkill = path.join(home, '.claude/skills/alpha/SKILL.md');
+    fs.appendFileSync(personalSkill, '\nMy own instructions.\n');
+    const before = fs.readFileSync(personalSkill, 'utf8');
+    const report = runDoctor();
+    const mcp = check(report, 'MCP servers delivered to claude');
 
     expect(mcp.ok).toBe(false);
+    expect(mcp.warning).toBe(true);
+    expect(check(report, 'Skills delivered to claude').warning).toBe(true);
+    expect(report.ok).toBe(true);
     expect(mcp.fix).toContain("not the team's definition: jira");
     expect(mcp.fix).toContain('--force');
+    expect(fs.readFileSync(personalSkill, 'utf8')).toBe(before);
+    fs.rmSync(personalSkill);
+    try {
+      const missing = runDoctor();
+      expect(missing.ok).toBe(false);
+      expect(check(missing, 'Skills delivered to claude').warning).not.toBe(true);
+      expect(check(missing, 'MCP servers delivered to claude').warning).toBe(true);
+    } finally {
+      write(personalSkill, before);
+    }
   });
 
   it('reports an agent copy left behind by an older spec', () => {

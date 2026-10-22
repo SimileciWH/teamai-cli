@@ -340,6 +340,18 @@ describe('checks at the end of an interactive pull', () => {
     expect(output).toContain('No stale env blocks left behind');
   });
 
+  it('reports a preserved personal resource as a warning, not a failed pull', async () => {
+    vi.mocked(buildChecks).mockResolvedValue([
+      { name: 'Personal skill kept', source: 'local', warning: true,
+        check: async () => false, fix: 'The personal skill is unchanged.' },
+    ]);
+    await pull({ force: true });
+    const output = printedOutput();
+    expect(output).not.toContain('check(s) failed');
+    expect(output).toContain('Personal skill kept');
+    expect(output).toContain('warning');
+  });
+
   it('a check that throws does not fail the pull', async () => {
     const failing: Check = {
       name: 'explodes',

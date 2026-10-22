@@ -89,6 +89,8 @@ export interface Check {
    * broken because of unrelated leftover state (#693 review round 6).
    */
   informational?: boolean;
+  /** A preserved personal resource differs from the team copy; it does not block updates. */
+  warning?: boolean;
   check: () => Promise<boolean>;
   fix?: string;
 }
@@ -131,6 +133,7 @@ export interface CheckResult {
   name: string;
   ok: boolean;
   fix?: string;
+  warning?: boolean;
 }
 
 /** What `doctor --json` prints. One object, one place that builds it. */
@@ -725,9 +728,9 @@ export async function runChecks(
   onResult?: (result: CheckResult) => void,
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
-  for (const { name, check, fix } of checks) {
+  for (const { name, check, fix, warning } of checks) {
     const ok = await check();
-    const result: CheckResult = ok ? { name, ok } : { name, ok, fix };
+    const result: CheckResult = ok ? { name, ok } : { name, ok, fix, ...(warning ? { warning: true } : {}) };
     results.push(result);
     onResult?.(result);
   }
@@ -744,9 +747,10 @@ function emitReport(report: DoctorReport): void {
  * prints the same shape through the logger rather than stdout — one definition
  * of the glyphs and the indent, two sinks.
  */
-export function formatCheckResult({ name, ok, fix }: CheckResult): string[] {
+export function formatCheckResult({ name, ok, fix, warning }: CheckResult): string[] {
   if (ok) return [`  ✔ ${name}`];
-  return fix ? [`  ✖ ${name}`, `    → ${fix}`] : [`  ✖ ${name}`];
+  const headline = `  ${warning ? '⚠' : '✖'} ${name}`;
+  return fix ? [headline, `    → ${fix}`] : [headline];
 }
 
 function renderResult(result: CheckResult): void {
@@ -799,7 +803,7 @@ export async function doctor(options: DoctorOptions): Promise<boolean> {
   // Doctor only: it spawns `codex app-server`, which the post-pull pass skips.
   const codexTrust = await codexHookTrust(ctx);
   const results = await runChecks([...await buildChecks(ctx), ...codexTrust.checks], jsonMode ? undefined : renderResult);
-  let allPassed = results.every((r) => r.ok);
+  let allPassed = results.every((r) => r.ok || r.warning);
 
   const { pkgDoctorReport } = await import('./pkg/commands.js');
   const packageReport = await pkgDoctorReport(localConfig, process.cwd());
@@ -854,7 +858,9 @@ export async function doctor(options: DoctorOptions): Promise<boolean> {
 
   console.log('');
   if (allPassed) {
-    log.success('All checks passed!');
+    const warnings = results.filter((r) => r.warning).length;
+    if (warnings > 0) log.warn(`Checks completed with ${warnings} warning(s); personal resources were kept.`);
+    else log.success('All checks passed!');
   } else {
     log.warn('Some checks failed. See suggestions above.');
   }

@@ -3609,8 +3609,9 @@ async function reportPostPullChecks(
     // wrong — it must not turn a genuinely healthy delivery into "Pull
     // finished, but N check(s) failed" (#693 review round 6).
     const informationalNames = new Set(local.filter((c) => c.informational).map((c) => c.name));
-    const blocking = failures.filter((f) => !informationalNames.has(f.name));
-    const informational = failures.filter((f) => informationalNames.has(f.name));
+    const warnings = failures.filter((f) => f.warning);
+    const blocking = failures.filter((f) => !f.warning && !informationalNames.has(f.name));
+    const informational = failures.filter((f) => !f.warning && informationalNames.has(f.name));
 
     if (blocking.length > 0) {
       log.warn(`Pull finished, but ${blocking.length} check(s) failed:`);
@@ -3618,6 +3619,12 @@ async function reportPostPullChecks(
         const [headline, ...detail] = formatCheckResult(failure);
         log.warn(headline);
         for (const line of detail) log.dim(line);
+      }
+    }
+    if (warnings.length > 0) {
+      log.warn(`Pull completed with ${warnings.length} warning(s); personal resources were kept:`);
+      for (const warning of warnings) {
+        for (const line of formatCheckResult(warning)) log.warn(line);
       }
     }
     for (const failure of informational) {

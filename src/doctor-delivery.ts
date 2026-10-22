@@ -276,6 +276,7 @@ export async function buildDeliveryChecks(ctx: DoctorContext): Promise<Check[]> 
   const { byTool } = await walkDelivery(getHandler('skills'), ctx, items, async (target, item) => {
     if (!await pathExists(target.dest)) return labels[0];
     if ((await judgeCopy(previous, item, target)).kind === 'member') {
+      if (!await skillIsDiscoverable(target.dest, item.name)) return labels[1];
       linesFor(memberLines, target.tool).push(await describeKeptEntry(target.dest, item.relativePath));
       return MEMBERS_OWN;
     }
@@ -285,6 +286,7 @@ export async function buildDeliveryChecks(ctx: DoctorContext): Promise<Check[]> 
   return [...byTool].map(([tool, delivery]) => ({
     name: `Skills delivered to ${tool}`,
     source: 'local',
+    warning: delivery.problems.size > 0 && [...delivery.problems.keys()].every((label) => label === MEMBERS_OWN),
     check: async () => delivery.problems.size === 0,
     fix: `In ${tool}, ${describeProblems(delivery.problems, labels)}.`
       + (delivery.problems.has(labels[0]) || delivery.problems.has(labels[1])
@@ -1084,12 +1086,12 @@ export async function buildMcpDeliveryChecks(ctx: DoctorContext): Promise<Check[
     const problems: string[] = [];
     // Its fix is the exclusion's own, not another pull (#882).
     let withheld: string | undefined;
+    const absent: string[] = [];
+    const foreign: string[] = [];
     const installed = await installedMcpEntries(target, { underKeyOnly: true });
     if (installed === null) {
       problems.push(`${target.file} could not be parsed, so no server was injected`);
     } else {
-      const absent: string[] = [];
-      const foreign: string[] = [];
       for (const [name, { entry }] of desired) {
         if (!installed.has(name)) absent.push(name);
         // An entry that is not the one teamai renders is not this server: the
@@ -1135,19 +1137,24 @@ export async function buildMcpDeliveryChecks(ctx: DoctorContext): Promise<Check[
     // Judged with every tool mapping the file, detected or not, as pull judges it (#993).
     const member = problems.length === 0 ? [] : await memberMcpServers(
       localConfig, await resolveMcpTargets(teamConfig, localConfig, { includeUndetected: true }), target, desired, desiredContext.vars);
+    const memberOnly = installed !== null && !withheld && blocked.length === 0 && absent.length === 0
+      && foreign.length > 0 && foreign.every((name) => member.includes(name));
     const declare = declareSecretHint(undeclaredMissingVars(
       skipped,
       kept,
       declaredSecretKeys(ctx.teamEnv?.declarations ?? { kind: 'absent' }),
     ));
-    const delivery = problems.length === 0 ? [] : [`In ${target.file}, ${problems.join('; ')}. A server needing a variable reads it from `
+    const delivery = problems.length === 0 ? [] : [`In ${target.file}, ${problems.join('; ')}.` + (memberOnly
+      ? ' Personal definitions were preserved; updating the CLI does not replace them.'
+      : ' A server needing a variable reads it from '
       + '`env/env.yaml` or an active `env/<ns>/env.yaml`, whose top-level key is `variables:` — a plain `KEY: value` mapping '
-      + `parses as no variables at all. Then run \`teamai pull\`.${declare}`,
+      + `parses as no variables at all. Then run \`teamai pull\`.${declare}`),
       ...member.map((name) => describeKeptMemberServer(name, target.file)),
       ...member.length > 0 ? ['Or run `teamai mcp inject --force` to replace it with the team\'s.'] : []];
     checks.push({
       name: `MCP servers delivered to ${mcpTargetAgent(target)}`,
       source: 'local',
+      warning: memberOnly,
       check: async () => problems.length === 0 && !withheld,
       fix: [...withheld ? [withheld] : [], ...delivery].join(' '),
     });

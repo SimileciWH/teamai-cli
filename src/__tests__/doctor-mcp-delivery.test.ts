@@ -3,6 +3,7 @@ import fse from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { commitTeamRepo } from './helpers/team-repo-history.js';
 
 vi.mock('../config.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../config.js')>()),
@@ -116,6 +117,24 @@ describe('doctor — MCP servers delivered on disk', () => {
     expect(await check.check()).toBe(false);
     expect(check.fix).toContain("not the team's definition: docs");
     expect(check.fix).toContain('--force');
+    expect(check.warning).toBe(true);
+  });
+
+  it('does not downgrade a missing server alongside a preserved personal server', async () => {
+    await writeTeamMcp('servers:\n  - name: docs\n    transport: stdio\n    command: docs-server\n'
+      + '  - name: search\n    transport: stdio\n    command: search-server\n');
+    await writeClaudeConfig({ docs: { type: 'stdio', command: 'personal-docs' } });
+    const check = await mcpCheck();
+    expect(await check.check()).toBe(false);
+    expect(check.warning).not.toBe(true);
+    expect(check.fix).toContain('not injected: search');
+  });
+
+  it('does not downgrade an unreadable MCP config', async () => {
+    await fse.writeFile(path.join(homeDir, '.claude.json'), '{broken');
+    const check = await mcpCheck();
+    expect(await check.check()).toBe(false);
+    expect(check.warning).not.toBe(true);
   });
 
   it('fails when the installed entry is a stale copy of the team definition', async () => {
@@ -134,6 +153,16 @@ describe('doctor — MCP servers delivered on disk', () => {
     expect(await check.check()).toBe(false);
     expect(check.fix).toContain('not injected: docs');
     expect(check.fix).toContain(path.join(homeDir, '.claude.json'));
+  });
+
+  it('keeps a known older team MCP definition blocking', async () => {
+    await writeClaudeConfig({ docs: { type: 'stdio', command: 'docs-server' } });
+    commitTeamRepo(repoPath, 'old definition');
+    await writeTeamMcp('servers:\n  - name: docs\n    transport: stdio\n    command: docs-server-v2\n');
+    commitTeamRepo(repoPath, 'new definition');
+    const check = await mcpCheck();
+    expect(await check.check()).toBe(false);
+    expect(check.warning).not.toBe(true);
   });
 
   it('names the variable a server was skipped for, and points at env.yaml', async () => {

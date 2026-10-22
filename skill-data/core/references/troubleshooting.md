@@ -9,8 +9,11 @@ resources don't show up. It is shared by all four scenarios.
 teamai doctor
 ```
 
-It checks provider config, hooks, paths, and package/plugin status. Fix what it
-reports before anything else.
+It checks provider config, hooks, paths, and package/plugin status. Fix blocking
+failures before proceeding. Preserved personal Skills or unowned MCP definitions
+are warnings: keep them unless the user asks to replace them. Warnings alone do
+not fail `doctor` or CLI updates. JSON checks retain `ok: false` with `warning: true`;
+the report's `ok` is true only when no blocking check or package failure remains.
 
 ## "Cannot acquire lock <path>: <reason>"
 
