@@ -60,7 +60,9 @@ and create-repo URLs, and the per-provider caveats, and points at
    displays its summary. Failed or pending required checks mean setup is incomplete.
    Read that summary instead of treating a successful clone as completed setup.
 4. **Finish with `teamai doctor`.** Every setup or onboarding flow ends by running
-   it and resolving what it reports before you call the job done.
+   it and resolving blocking failures before you call the job done. Explain
+   compatibility warnings without upgrading the user's Git or changing personal
+   hooks just to make every check green.
 
 Every public command and every flag, including the flags `--help` hides, is listed in
 `teamai skill get core --full` under `references/commands.md`. Do not guess a flag:

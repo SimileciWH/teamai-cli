@@ -10,7 +10,9 @@
 
 ### 项目 checkout
 
-同一仓库的 linked worktree 共用项目的 TeamAI 配置和数据，但每个 checkout 都会在自己的工具目录中接收资源。`init` 和 `pull` 会安装 Git checkout hooks，在新 worktree 中为已启用的工具创建根目录并拉取资源，然后 checkout 命令才会返回。
+同一仓库的 linked worktree 共用项目的 TeamAI 配置和数据，但每个 checkout 都会在自己的工具目录中接收资源。现有 Git 环境允许时，`init` 和 `pull` 会安装 Git checkout hooks，在新 worktree 中为已启用的工具创建根目录并拉取资源，然后 checkout 命令才会返回。
+
+旧 Git 已有 hook 管理器或不适合接入的 hook 文件时，TeamAI 保留原状。`doctor` 会把缺少 Git 事件自动同步列为提示，不再判定安装失败。`teamai pull` 和客户端已支持的会话启动 hooks 仍可使用，无需升级 Git 或修改个人 hooks。没有会话启动 hooks 的客户端不会因此获得自动同步能力。
 
 在 superproject worktree 中创建的子模块克隆会继承原始子模块的 TeamAI 配置和数据分区。首次 pull 会根据原始配置为克隆创建工具根目录、将资源投递到这些目录，并安装由该克隆拥有的 hooks。每个 checkout 分别记录 hook 所有权；完整卸载会移除所有 checkout 所记录的 hooks。定向卸载行为见[卸载](./faq.md#卸载)。
 

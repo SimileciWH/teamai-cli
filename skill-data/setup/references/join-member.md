@@ -136,7 +136,10 @@ teamai doctor
 teamai hooks list      # per-tool: which AI tools actually got the hooks
 ```
 
-Fix anything `doctor` reports. **Don't trust the "Hooks injected into all AI tool
+Resolve blocking failures from `doctor`. Compatibility warnings about preserved
+Git hooks do not require upgrading Git or editing personal hooks; explain the
+sync limitation without treating an otherwise working setup as failed.
+**Don't trust the "Hooks injected into all AI tool
 settings" message alone** — it prints even for tools where nothing was written;
 `teamai doctor` / `teamai hooks list` show the real per-tool status. If it flags
 hook problems, load the troubleshooting reference (`"$(teamai skill path core)/references/troubleshooting.md"`),

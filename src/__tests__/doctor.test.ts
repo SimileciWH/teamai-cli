@@ -60,6 +60,12 @@ vi.mock('../update.js', async (importOriginal) => ({
     removeZombieLocks: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock('../git-hook.js', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../git-hook.js')>()),
+    gitHookStatus: vi.fn().mockResolvedValue({ installed: true }),
+    readGitHookFailure: vi.fn().mockResolvedValue(null),
+}));
+
 // Mock the tgit provider to avoid side effects
 vi.mock('../providers/tgit/index.js', () => ({
     isGfInstalled: vi.fn().mockResolvedValue(true),
@@ -84,6 +90,7 @@ import { log, setStderrOnly } from '../utils/logger.js';
 import { isGfInstalled, gfIsAuthenticated } from '../providers/tgit/index.js';
 import { buildChecks, doctor, resolveDoctorContext } from '../doctor.js';
 import type { DoctorReport } from '../doctor.js';
+import { gitHookStatus, readGitHookFailure, type GitHookStatus } from '../git-hook.js';
 
 const mockedLoadLocalConfig = loadLocalConfig as Mock;
 const mockedLoadTeamConfig = loadTeamConfig as Mock;
@@ -131,6 +138,8 @@ const originalCodexHome = process.env.CODEX_HOME;
 
 beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(gitHookStatus).mockResolvedValue({ installed: true });
+    vi.mocked(readGitHookFailure).mockResolvedValue(null);
     delete process.env.CLAUDE_CONFIG_DIR;
     delete process.env.CODEX_HOME;
     mockedLoadLocalConfig.mockResolvedValue(mockLocalConfig);
@@ -677,6 +686,59 @@ describe('doctor — JSON report', () => {
         expect(report.checks).toHaveLength(1);
         expect(report.checks[0]).toMatchObject({ name: 'TeamAI is not initialized', ok: false });
         expect(report.checks[0].fix).toContain('teamai init');
+    });
+});
+
+describe('doctor — Git hook compatibility', () => {
+    beforeEach(() => {
+        mockedLoadLocalConfig.mockResolvedValue({
+            ...mockLocalConfig,
+            scope: 'project',
+            projectRoot: '/tmp/teamai-doctor-git-compat',
+        });
+    });
+
+    async function gitChecks() {
+        const ctx = await resolveDoctorContext();
+        if (!ctx) throw new Error('expected a resolved doctor context');
+        return (await buildChecks(ctx)).filter((c) => /git hook/i.test(c.name));
+    }
+
+    it.each(['hooks-path', 'other-hook'] as const)('reports %s as a warning without hiding the limitation', async (reason) => {
+        vi.mocked(gitHookStatus).mockResolvedValue({ installed: false, reason, gitVersion: 'git version 2.50.1' });
+
+        const [check] = await gitChecks();
+
+        expect(await check.check()).toBe(false);
+        expect(check.warning).toBe(true);
+        expect(check.fix).toContain('Automatic sync after Git commands is unavailable');
+        expect(check.fix).toContain('No Git upgrade or hook edits are needed');
+    });
+
+    it.each<GitHookStatus>([
+        { installed: false, reason: 'not-configured' },
+        { installed: false, reason: 'disabled', event: 'post-merge', disabledBy: 'hook', scope: 'local' },
+    ])('keeps unexpected missing or disabled hooks actionable: $reason', async (status) => {
+        vi.mocked(gitHookStatus).mockResolvedValue(status);
+
+        const [check] = await gitChecks();
+
+        expect(await check.check()).toBe(false);
+        expect(check.warning).not.toBe(true);
+    });
+
+    it('keeps an actual sync failure blocking even alongside a compatibility warning', async () => {
+        vi.mocked(gitHookStatus).mockResolvedValue({ installed: false, reason: 'hooks-path', gitVersion: 'git version 2.50.1' });
+        vi.mocked(readGitHookFailure).mockResolvedValue({
+            kind: 'fetch-failed', event: 'post-merge', at: '2026-10-22T00:00:00Z', error: 'Cannot reach team repo',
+        });
+
+        const [compatibility, failure] = await gitChecks();
+
+        expect(compatibility.warning).toBe(true);
+        expect(failure.name).toContain('Cannot reach team repo');
+        expect(await failure.check()).toBe(false);
+        expect(failure.warning).not.toBe(true);
     });
 });
 

@@ -326,7 +326,7 @@ describe('teamai hook script on a Git without config hooks', () => {
     expect(fs.statSync(hookFile('post-checkout')).mode & 0o777).toBe(0o700);
   });
 
-  it('leaves a core.hooksPath manager\'s files alone, and doctor advises upgrading or a guarded line', async () => {
+  it('preserves a core.hooksPath manager and explains the compatible sync paths', async () => {
     const managed = path.join(sandbox, 'managed');
     fs.mkdirSync(managed);
     fs.writeFileSync(path.join(managed, 'post-checkout'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
@@ -340,12 +340,10 @@ describe('teamai hook script on a Git without config hooks', () => {
     const status = await gitHookStatus(repo);
     expect(status).toMatchObject({ installed: false, reason: 'hooks-path' });
     const advice = describeMissingGitHook(status as Exclude<typeof status, { installed: true }>);
-    const upgrade = advice.indexOf('Upgrade Git');
-    const guarded = advice.indexOf('command -v teamai >/dev/null 2>&1 && teamai hook-dispatch post-checkout --tool git "$@"');
-    expect(upgrade).toBeGreaterThan(-1);
-    expect(guarded).toBeGreaterThan(upgrade);
-    expect(advice).toContain('teamai hook-dispatch post-merge --tool git "$@"');
-    expect(advice).toContain('sh -c');
+    expect(advice).toContain('Automatic sync after Git commands is unavailable');
+    expect(advice).toContain('`teamai pull` and supported AI session-start hooks remain available');
+    expect(advice).toContain('No Git upgrade or hook edits are needed');
+    expect(advice).not.toContain('hook-dispatch');
   });
 
   it('a dry run reports the change without writing the hook', async () => {

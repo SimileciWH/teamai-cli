@@ -10,7 +10,9 @@ Where files install, which repo they come from, and who receives them are all he
 
 ### Project checkouts
 
-Linked worktrees of the same repository share the project's TeamAI configuration and data, while each checkout receives resources in its own tool directories. `init` and `pull` install Git checkout hooks that seed a new worktree's enabled tool roots and pull its resources before the checkout command returns.
+Linked worktrees of the same repository share the project's TeamAI configuration and data, while each checkout receives resources in its own tool directories. Where the existing Git setup allows it, `init` and `pull` install Git checkout hooks that seed a new worktree's enabled tool roots and pull its resources before the checkout command returns.
+
+On older Git, TeamAI preserves an existing hook manager or incompatible hook file. `doctor` reports the missing Git-event sync as a warning, not a failed installation. `teamai pull` and supported AI session-start hooks remain available; TeamAI does not require a Git upgrade or edits to personal hooks. Tools without session-start hooks do not gain automatic sync from this fallback.
 
 A submodule clone created inside a superproject worktree inherits the original submodule's TeamAI configuration and data partition. Its first pull seeds the clone's tool roots from the original configuration, delivers resources into those roots, and installs hooks owned by that clone. Each checkout keeps its own hook ownership; full uninstall removes hooks recorded for every checkout. For targeted uninstall behavior, see [Uninstall](./faq.md#uninstall).
 

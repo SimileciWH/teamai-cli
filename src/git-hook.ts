@@ -174,15 +174,10 @@ export function describeMissingGitHook(status: Exclude<GitHookStatus, { installe
       const where = status.reason === 'hooks-path'
         ? 'core.hooksPath is set, so teamai leaves the hook manager\'s files alone'
         : 'a post-checkout, post-merge or post-rewrite hook in .git/hooks is a symlink or not an executable shell script, so teamai leaves it alone';
-      const owner = status.reason === 'hooks-path' ? 'your hook manager defines' : 'in .git/hooks';
-      return `${status.gitVersion || 'This git'} has no config-based hooks (Git 2.54 or later) and ${where}: new `
-        + 'worktrees and `git pull` get the team\'s resources only at the next session. Either: '
-        + '1. Upgrade Git to 2.54 or later, then run `teamai pull`. '
-        + `2. If the team agrees to commit it, run this line from the post-checkout hook ${owner}, `
-        + `\`${guardedGitHookLine('post-checkout')}\`, and this one from the post-merge hook, `
-        + `\`${guardedGitHookLine('post-merge')}\`, and this one from the post-rewrite hook, `
-        + `\`${guardedGitHookLine('post-rewrite')}\`; wrap each in \`sh -c '...'\` when the hook config is not a `
-        + 'shell script. All do nothing on a machine without teamai.';
+      return `${status.gitVersion || 'This Git'} does not support config-based hooks and ${where}. `
+        + 'Automatic sync after Git commands is unavailable with this setup. '
+        + '`teamai pull` and supported AI session-start hooks remain available. '
+        + 'No Git upgrade or hook edits are needed to use TeamAI.';
     }
     case 'not-a-repository':
       return 'The project root is not a git repository, so there is no git event to hook.';

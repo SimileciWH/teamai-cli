@@ -89,7 +89,7 @@ export interface Check {
    * broken because of unrelated leftover state (#693 review round 6).
    */
   informational?: boolean;
-  /** A preserved personal resource differs from the team copy; it does not block updates. */
+  /** A preserved personal resource or compatibility limit does not block normal delivery. */
   warning?: boolean;
   check: () => Promise<boolean>;
   fix?: string;
@@ -671,7 +671,10 @@ async function buildGitHookChecks(localConfig: LocalConfig, stage: CheckStage): 
     name: 'Git hook syncs new worktrees and git pull',
     source: 'local',
     check: async () => status.installed,
-    ...(status.installed ? {} : { fix: describeMissingGitHook(status) }),
+    ...(status.installed ? {} : {
+      fix: describeMissingGitHook(status),
+      ...(['hooks-path', 'other-hook'].includes(status.reason) ? { warning: true } : {}),
+    }),
   }];
   return [
     ...installed,
@@ -859,7 +862,7 @@ export async function doctor(options: DoctorOptions): Promise<boolean> {
   console.log('');
   if (allPassed) {
     const warnings = results.filter((r) => r.warning).length;
-    if (warnings > 0) log.warn(`Checks completed with ${warnings} warning(s); personal resources were kept.`);
+    if (warnings > 0) log.warn(`Diagnostics completed with ${warnings} warning(s).`);
     else log.success('All checks passed!');
   } else {
     log.warn('Some checks failed. See suggestions above.');
