@@ -769,18 +769,33 @@ async function writeOwnerLines(
   }
 }
 
-/** Paths among `placed` git tracks, per checkout: one `ls-files` per checkout. A checkout git fails in goes to `failed`. */
+/** Bound argv size, including quoting overhead, for Windows and older Git without new pathspec options. */
+function pathspecBatches(placed: Placed[]): Placed[][] {
+  const batches: Placed[][] = [];
+  let batch: Placed[] = [], size = 0;
+  for (const item of placed) {
+    const cost = item.rel.length * 2 + 4;
+    if (batch.length && size + cost > 8192) { batches.push(batch); batch = []; size = 0; }
+    batch.push(item); size += cost;
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
+}
+
+/** Paths among `placed` git tracks, in bounded batches. A checkout git fails in goes to `failed`. */
 async function trackedPaths(placed: Placed[], failed: GitCheckFailure[]): Promise<TrackedPath[]> {
   const tracked: TrackedPath[] = [];
   for (const [root, group] of groupBy(placed, (p) => p.root)) {
-    const listed = await runGit(['--literal-pathspecs', 'ls-files', '-z', '--', ...group.map((p) => p.rel)], root);
-    if (listed.code !== 0) {
-      failed.push({ checkout: root, error: listed.stderr.trim() || `git exited with ${listed.code}` });
-      continue;
-    }
-    const files = new Set(listed.stdout.split('\0').filter(Boolean));
-    for (const p of group) {
-      if (files.has(p.rel)) tracked.push({ path: p.path, checkout: root });
+    for (const batch of pathspecBatches(group)) {
+      const listed = await runGit(['--literal-pathspecs', 'ls-files', '-z', '--', ...batch.map((p) => p.rel)], root);
+      if (listed.code !== 0) {
+        failed.push({ checkout: root, error: listed.stderr.trim() || `git exited with ${listed.code}` });
+        break;
+      }
+      const files = new Set(listed.stdout.split('\0').filter(Boolean));
+      for (const p of batch) {
+        if (files.has(p.rel)) tracked.push({ path: p.path, checkout: root });
+      }
     }
   }
   return tracked;
@@ -788,7 +803,7 @@ async function trackedPaths(placed: Placed[], failed: GitCheckFailure[]): Promis
 
 /**
  * Paths among `placed` git would still offer for a commit, with the rule that
- * re-includes each when git names one: one `ls-files --others` per checkout,
+ * re-includes each when git names one: bounded `ls-files --others` batches,
  * then `check-ignore -v` only for those few.
  */
 async function reincludedPaths(placed: Placed[], failed: GitCheckFailure[]): Promise<Array<{ path: string; rule: ReincludingRule | null }>> {
@@ -797,21 +812,21 @@ async function reincludedPaths(placed: Placed[], failed: GitCheckFailure[]): Pro
 
 /**
  * Paths among `placed` git would still offer for a commit (untracked and not
- * ignored), each with the file git offers: one
- * `ls-files --others` per checkout.
+ * ignored), each with the file git offers, in bounded batches per checkout.
  */
 async function offeredPaths(placed: Placed[], failed: GitCheckFailure[]): Promise<Map<Placed, string>> {
   const found = new Map<Placed, string>();
   for (const [root, group] of groupBy(placed, (p) => p.root)) {
-    const listed = await runGit(['--literal-pathspecs', 'ls-files', '-z', '--others', '--exclude-standard', '--', ...group.map((p) => p.rel)], root);
-    if (listed.code !== 0) {
-      if (!failed.some((f) => f.checkout === root)) failed.push({ checkout: root, error: listed.stderr.trim() || `git exited with ${listed.code}` });
-      continue;
-    }
-    const visible = listed.stdout.split('\0').filter(Boolean);
-    for (const p of group) {
-      const offered = visible.find((f) => f === p.rel);
-      if (offered) found.set(p, path.join(root, offered));
+    for (const batch of pathspecBatches(group)) {
+      const listed = await runGit(['--literal-pathspecs', 'ls-files', '-z', '--others', '--exclude-standard', '--', ...batch.map((p) => p.rel)], root);
+      if (listed.code !== 0) {
+        if (!failed.some((f) => f.checkout === root)) failed.push({ checkout: root, error: listed.stderr.trim() || `git exited with ${listed.code}` });
+        break;
+      }
+      const visible = new Set(listed.stdout.split('\0').filter(Boolean));
+      for (const p of batch) {
+        if (visible.has(p.rel)) found.set(p, path.join(root, p.rel));
+      }
     }
   }
   return found;
@@ -1144,10 +1159,9 @@ export interface GitExcludeReport {
 /**
  * Read-only: how `owner`'s blocks stand against `expectedPaths`, per exclude
  * file (recorded ones and those the paths route to). Writes nothing and
- * creates no lock file. git is asked a fixed number of times per checkout:
- * where its exclude file is, what it tracks, which paths it still offers for
- * a commit (one `ls-files --others`), then `check-ignore -v` only for the
- * listed paths it offers.
+ * creates no lock file. Per checkout, git locates its exclude file, checks
+ * tracked and offered paths in bounded batches, then runs `check-ignore -v`
+ * only for the listed paths it offers.
  */
 export async function report(owner: GitExcludeOwner, expectedPaths: Iterable<string>, context = new GitContext()): Promise<GitExcludeReport> {
   markersOf(owner.name);

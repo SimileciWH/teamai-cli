@@ -910,6 +910,28 @@ describe('git exclude blocks (#915)', () => {
       expect(calls.length).toBeLessThanOrEqual(5);
     });
 
+    it('checks hundreds of delivered paths without exceeding a native command line limit', async () => {
+      const paths = Array.from({ length: 400 }, (_, i) => inRepo(`resource-${i}-${'x'.repeat(80)}.md`));
+      for (const file of paths) await fse.outputFile(file, 'resource\n');
+      commit(repo, path.basename(paths[0]));
+      await fse.outputFile(inRepo('.gitignore'), `!${path.basename(paths[399])}\n`);
+      await fse.outputFile(excludeFile, ['# [teamai:delivered:start]', ...paths.map((p) => `/${path.basename(p)}`), '# [teamai:delivered:end]', ''].join('\n'));
+      const before = await read();
+      const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+      const bin = path.join(tmp, 'limited-git');
+      await fse.outputFile(path.join(bin, 'git'), `#!/bin/sh\nargs="$*"\nif [ "\${#args}" -gt 16000 ]; then echo ENAMETOOLONG >&2; exit 123; fi\nexec '${realGit}' "$@"\n`, { mode: 0o755 });
+      const oldPath = process.env.PATH;
+      process.env.PATH = `${bin}${path.delimiter}${oldPath ?? ''}`;
+      let result: Awaited<ReturnType<typeof report>>;
+      try { result = await report(memoryOwner('delivered'), paths); }
+      finally { process.env.PATH = oldPath; }
+      expect(result.files).toMatchObject([{
+        checkFailed: [], tracked: [{ path: paths[0], checkout: repo }],
+        visible: [paths[399]], reincluded: [{ path: paths[399] }],
+      }]);
+      expect(await read()).toBe(before);
+    });
+
     it('creates no info/ in a repository without one', async () => {
       await fse.remove(inRepo('.git', 'info'));
       await fse.outputFile(inRepo('a.md'), 'a\n');
