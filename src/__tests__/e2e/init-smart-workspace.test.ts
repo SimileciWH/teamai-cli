@@ -10,7 +10,7 @@ const TEAM = 'ssh://teamai-fixture.invalid:29418/team/ai-docs';
 const SOURCE = 'ssh://source-fixture.invalid:29418/firmware/a';
 let root: string;
 
-function fixture(name: string, agents: string[], failingPostPull = false) {
+function fixture(name: string, agents: string[], failingPostPull = false, requiredPostPull = false) {
   const base = path.join(root, name);
   const home = path.join(base, 'home');
   const project = path.join(base, 'arbitrary-checkout-name');
@@ -45,7 +45,7 @@ function fixture(name: string, agents: string[], failingPostPull = false) {
     team: 'Fixture', repo: TEAM, provider: 'git', gerrit: { targetBranch: 'main', wip: true },
     onboarding: { defaultRole: 'rd' }, autoUpdate: false, usageReport: false,
     sharing: { recall: { enabled: false }, webhooks: { enabled: false }, env: { injectShellProfile: false }, gitExclude: { enabled: true } },
-    scripts: { postPull: { path: 'ready.mjs' } },
+    scripts: { postPull: { path: 'ready.mjs', ...(requiredPostPull ? { required: true } : {}) } },
   }));
   write('manifest/roles.yaml', YAML.stringify({ version: 1, roles: [
     { id: 'rd', resources: { knowledge: [], skills: ['common'] } },
@@ -89,6 +89,28 @@ describe.skipIf(process.platform === 'win32')('short workspace init with the bui
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-short-init-'));
   });
   afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it('fails both init and interactive pull when a required migration fails', () => {
+    const f = fixture('required-post-fail', ['claude'], true, true);
+    const init = f.run('init', TEAM);
+    expect(init.code, init.output).not.toBe(0);
+    expect(init.output).toContain('Required post-pull checks are failed');
+    const pull = f.run('pull');
+    expect(pull.code, pull.output).not.toBe(0);
+    expect(pull.output).toContain('Required post-pull checks are failed');
+  });
+
+  it('waits for required post-pull on repeated interactive pulls', () => {
+    const f = fixture('required-post-ok', ['claude'], false, true);
+    fs.writeFileSync(path.join(f.repo, 'ready.mjs'),
+      "import fs from 'node:fs'; import path from 'node:path'; if (!fs.existsSync(path.join(process.env.TEAMAI_REPO, '..', '.sync-lock'))) process.exit(7);\n");
+    f.git(f.repo, 'add', 'ready.mjs');
+    f.git(f.repo, 'commit', '-m', 'Assert required script holds the clone lock');
+    const init = f.run('init', TEAM);
+    expect(init.code, init.output).toBe(0);
+    const pull = f.run('pull');
+    expect(pull.code, pull.output).toBe(0);
+  });
 
   it('refuses the implicit default in HOME before authenticating, cloning or writing config', () => {
     const f = fixture('implicit-at-home', ['codex']);

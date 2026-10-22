@@ -52,13 +52,13 @@ and create-repo URLs, and the per-provider caveats, and points at
    design), and any installed hooks that still need trust (e.g. Codex with
    automatic trust disabled or unavailable). Verify the real per-tool result with
    `teamai doctor` and `teamai hooks list`.
-3. **`teamai init` does not pull.** It saves the config and installs hooks. It does
-   not copy team skills, rules or MCP. In workspace scope it creates a tool directory
-   only for a tool named with `--agent`, or picked when a person runs it in a
-   terminal. Those resources arrive on that tool's next session start, or when you
-   run `teamai pull`. Run from an agent shell (no terminal), a workspace-scope init
-   without `--agent` creates no tool directory: the directory appears when the user
-   opens that tool in the project, and that session start pulls.
+3. **Check which onboarding flow ran.** A team declaring `onboarding.defaultRole`
+   supports short workspace init: it detects installed clients and includes the
+   initial resource pull. Other init flows save configuration and hooks, with
+   resources delivered by a later pull or session start. A team may require a
+   post-pull setup check (`scripts.postPull.required: true`); init/pull waits and
+   displays its summary. Failed or pending required checks mean setup is incomplete.
+   Read that summary instead of treating a successful clone as completed setup.
 4. **Finish with `teamai doctor`.** Every setup or onboarding flow ends by running
    it and resolving what it reports before you call the job done.
 

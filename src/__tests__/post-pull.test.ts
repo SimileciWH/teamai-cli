@@ -57,7 +57,7 @@ function writeScript(name: string, body: string): string {
   return file;
 }
 
-function teamConfig(postPull?: { path: string }): TeamaiConfig {
+function teamConfig(postPull?: { path: string; required?: boolean }): TeamaiConfig {
   return { scripts: postPull ? { postPull } : undefined } as TeamaiConfig;
 }
 
@@ -84,6 +84,31 @@ describe('budget sizing', () => {
 });
 
 describe('runDeclaredPostPull (interactive)', () => {
+  it('waits for a required script and exposes its bounded summary', async () => {
+    writeScript('post.mjs', 'console.log("Guidance migration complete");\n');
+    mockLoadTeamConfig.mockResolvedValue(teamConfig({ path: 'post.mjs', required: true }));
+    const info = vi.spyOn(log, 'info').mockImplementation(() => {});
+    try {
+      await expect(runDeclaredPostPull(dir, { interactive: true, display: true })).resolves.toEqual({ outcome: 'complete', required: true });
+      expect(info).toHaveBeenCalledWith('Guidance migration complete');
+      expect(mockSpawn.mock.calls.at(-1)![2].env.TEAMAI_POSTPULL_REQUIRED).toBe('1');
+    } finally { info.mockRestore(); }
+  });
+
+  it('reports a required script failure instead of returning pending', async () => {
+    writeScript('post.mjs', 'process.exitCode = 2;\n');
+    mockLoadTeamConfig.mockResolvedValue(teamConfig({ path: 'post.mjs', required: true }));
+    await expect(runDeclaredPostPull(dir, { interactive: true })).resolves.toEqual({ outcome: 'failed', required: true });
+  });
+
+  it('keeps the required flag from the configuration used to launch the script', async () => {
+    writeScript('post.mjs', 'process.exitCode = 2;\n');
+    mockLoadTeamConfig.mockResolvedValueOnce(teamConfig({ path: 'post.mjs', required: true }))
+      .mockResolvedValue(teamConfig({ path: 'post.mjs' }));
+    await expect(runDeclaredPostPull(dir, { interactive: true })).resolves.toEqual({ outcome: 'failed', required: true });
+    expect(mockLoadTeamConfig).toHaveBeenCalledTimes(1);
+  });
+
   it('launches fire-and-forget into the user terminal instead of waiting', async () => {
     writeScript('post.mjs', 'export {};\n');
     mockLoadTeamConfig.mockResolvedValue(teamConfig({ path: 'post.mjs' }));
@@ -177,7 +202,7 @@ describe('runDeclaredPostPull', () => {
 
   it('skips when the declared script is missing', async () => {
     mockLoadTeamConfig.mockResolvedValue(teamConfig({ path: 'missing.mjs' }));
-    await expect(runDeclaredPostPull(dir)).resolves.toBe('pending');
+    await expect(runDeclaredPostPull(dir)).resolves.toEqual({ outcome: 'pending', required: false });
     expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('declared script not found'));
   });
 
@@ -201,7 +226,7 @@ describe('runDeclaredPostPull', () => {
     fs.writeFileSync(outside, 'export {};\n', 'utf8');
     mockLoadTeamConfig.mockResolvedValue(teamConfig({ path: `../${outsideName}` }));
 
-    await expect(runDeclaredPostPull(dir)).resolves.toBe('failed');
+    await expect(runDeclaredPostPull(dir)).resolves.toMatchObject({ outcome: 'failed' });
     expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('postPull: skipped'));
     fs.rmSync(outside, { force: true });
   });
@@ -212,7 +237,7 @@ describe('runDeclaredPostPull', () => {
 
     if (trySymlink(outside, path.join(dir, 'link.mjs'))) {
       mockLoadTeamConfig.mockResolvedValue(teamConfig({ path: 'link.mjs' }));
-      await expect(runDeclaredPostPull(dir)).resolves.toBe('failed');
+      await expect(runDeclaredPostPull(dir)).resolves.toMatchObject({ outcome: 'failed' });
       expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('postPull: skipped'));
     }
 

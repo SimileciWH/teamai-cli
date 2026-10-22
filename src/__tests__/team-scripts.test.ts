@@ -17,7 +17,7 @@ vi.mock('node:child_process', async (importOriginal) => {
   return { ...actual, spawn: mockSpawn };
 });
 
-const { runTeamScript, POST_DEPLOY_BUDGET_SEC } = await import('../team-scripts.js');
+const { runTeamScript, POST_DEPLOY_BUDGET_SEC, teamScriptEnv } = await import('../team-scripts.js');
 const { trySymlink } = await import('./helpers/symlink.js');
 const { log } = await import('../utils/logger.js');
 
@@ -81,6 +81,18 @@ function fakeScript(code: number) {
 }
 
 describe('teamai.yaml scripts', () => {
+  it('does not pass an inherited checkout identity to a user-scope script', async () => {
+    vi.stubEnv('TEAMAI_CHECKOUT', '/wrong/checkout');
+    vi.stubEnv('TEAMAI_PROJECT', '/wrong/project');
+    vi.stubEnv('TEAMAI_MAIN_CHECKOUT', '/wrong/main');
+    try {
+      const env = await teamScriptEnv(config(dir));
+      expect(env.TEAMAI_CHECKOUT).toBeUndefined();
+      expect(env.TEAMAI_PROJECT).toBeUndefined();
+      expect(env.TEAMAI_MAIN_CHECKOUT).toBeUndefined();
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it('keeps the new events and strips one it does not know', () => {
     const parsed = TeamaiConfigSchema.parse({
       team: 'test',

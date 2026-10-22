@@ -465,7 +465,7 @@ export const TeamaiConfigBaseSchema = z.object({
     /** At the start of a full pull, before that scope is synced. Not on an inline pull. */
     prePull: TeamScriptSchema.optional(),
     /** At the end of a full pull, after resources, hooks, MCP and reports. Not on an inline pull. */
-    postPull: TeamScriptSchema.optional(),
+    postPull: TeamScriptSchema.extend({ required: z.boolean().optional() }).optional(),
     /**
      * After the inline delivery that prepares a new checkout (a linked
      * worktree, or a submodule's first checkout that already runs teamai's

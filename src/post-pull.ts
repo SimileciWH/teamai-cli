@@ -62,12 +62,12 @@ function resolvePostPullScript(teamConfig: TeamaiConfig, repoPath: string): stri
 
 /**
  * Run the team's post-pull script for one pulled scope, if it declares one.
- * Never throws: a team script rides on the pull, so a bad path, a missing file
- * or a failed spawn is one log line — not a failed sync.
+ * Returns the outcome and required flag from the same configuration snapshot.
+ * Required scripts fail setup on a bad path, a missing file or a failed spawn.
  *
  * `interactive` picks the launch shape: the hook path (a headless pull) passes
  * nothing and waits the script out under the budget; a human-triggered pull
- * passes true and gets the fire-and-forget shape.
+ * passes true and gets the fire-and-forget shape unless the script is required.
  */
 export type PostPullOutcome = 'absent' | 'complete' | 'failed' | 'pending';
 
@@ -75,19 +75,22 @@ export async function runDeclaredPostPull(
   repoPath: string,
   {
     interactive = false,
+    display = false,
     localConfig,
-  }: { interactive?: boolean; localConfig?: LocalConfig } = {},
-): Promise<PostPullOutcome> {
+  }: { interactive?: boolean; display?: boolean; localConfig?: LocalConfig } = {},
+): Promise<{ outcome: PostPullOutcome; required: boolean }> {
+  let required = true;
   try {
     const teamConfig = await loadTeamConfig(repoPath);
-    if (!teamConfig) return 'failed';
+    if (!teamConfig) return { outcome: 'failed', required };
+    required = teamConfig.scripts?.postPull?.required === true;
     const scriptPath = resolvePostPullScript(teamConfig, repoPath);
-    if (!scriptPath) return 'absent';
+    if (!scriptPath) return { outcome: 'absent', required };
     // A declared-but-missing script is a rollout state (not yet committed,
     // submodule not populated), not an error — one stat and done.
     if (!fs.existsSync(scriptPath)) {
       log.debug(`postPull: declared script not found: ${scriptPath}`);
-      return 'pending';
+      return { outcome: 'pending', required };
     }
     // Containment: this script runs on every member's machine, so the repo
     // must not be able to point it outside its own clone, symlinks included.
@@ -98,16 +101,19 @@ export async function runDeclaredPostPull(
     // resolver on every pull fails those mocks.
     const env = localConfig
       ? await (await import('./team-scripts.js')).teamScriptEnv(localConfig)
-      : undefined;
-    if (interactive) {
+      : { ...process.env };
+    delete env.TEAMAI_POSTPULL_REQUIRED;
+    if (required) env.TEAMAI_POSTPULL_REQUIRED = '1';
+    if (interactive && !required) {
       runPostPullInteractive(scriptPath, repoPath, env);
-      return 'pending';
+      return { outcome: 'pending', required };
     } else {
-      return await runPostPull(scriptPath, repoPath, POST_PULL_BUDGET_SEC, env);
+      const outcome = await runPostPull(scriptPath, repoPath, POST_PULL_BUDGET_SEC, env, required && display);
+      return { outcome, required };
     }
   } catch (e) {
     log.debug(`postPull: skipped: ${(e as Error).message}`);
-    return 'failed';
+    return { outcome: 'failed', required };
   }
 }
 
@@ -173,11 +179,19 @@ export async function runPostPull(
   repoPath: string,
   budgetSec: number = POST_PULL_BUDGET_SEC,
   env?: NodeJS.ProcessEnv,
+  display = false,
 ): Promise<PostPullOutcome> {
   log.debug(`postPull: launched path=${scriptPath} budget=${budgetSec}s`);
   const startedAt = Date.now();
   const child = spawnScript(scriptPath, repoPath, ['ignore', 'pipe', 'pipe'], budgetSec, env);
   const readTail = captureTail(child, TAIL_CHARS);
+  // Required local checks produce a bounded summary, also visible during init.
+  let summary = '';
+  if (display) {
+    const collect = (chunk: Buffer | string) => { summary = (summary + chunk.toString()).slice(-12_000); };
+    child.stdout?.on('data', collect);
+    child.stderr?.on('data', collect);
+  }
 
   const exited = new Promise<number | null>((resolve) => {
     // spawnScript already logged the canonical line for an async spawn
@@ -202,6 +216,7 @@ export async function runPostPull(
   }
 
   const ms = Date.now() - startedAt;
+  if (display && summary.trim()) log.info(redactWithEnv(summary.trim()));
   if (code === null) return 'failed';
   if (code === 0) {
     log.debug(`postPull: exited 0 in ${ms}ms (${scriptPath})`);

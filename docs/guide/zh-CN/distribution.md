@@ -145,6 +145,7 @@ scripts:
 - `postInit` 在 hook 装好之后跑。init 等它结束，再同步一次 MCP，这样脚本里填的值会生效。跳过规则和 `preInit` 一样。`teamai script run postInit` 会再跑一次并同步 MCP。
 - `prePull` 在一次完整 pull 的开头、该 scope 同步之前跑。它不能读终端。pull 最多等 90 秒，超时后让它继续在后台跑。inline pull 不跑它。
 - `postPull` 在完整 pull 结束之后跑。会话启动最多等 90 秒，超时后留在后台。交互式 `teamai pull` 不等。inline pull 不跑。失败记在 `~/.teamai/debug.log`。
+  接入核验或本地迁移必须完成后才能宣称成功时，设置 `scripts.postPull.required: true`。交互 pull 和短命令 init 会等待、显示限长汇总；脚本失败或仍 pending 时返回失败。脚本收到 `TEAMAI_POSTPULL_REQUIRED=1`。静默 pull 保留诊断，inline pull 仍不执行；已有可选脚本的行为不变。
 - `postDeploy` 在新建的 linked worktree，或 submodule 第一次检出时，在那条 git 命令返回前的交付做完后跑。这条路径不会跑 `teamai init`。pull 最多等 15 秒。用 `teamai script run postDeploy` 再跑。脚本应当可以重复执行，并且保留已经存在的个人文件。
 
 ## 角色和项目

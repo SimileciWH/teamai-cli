@@ -85,6 +85,10 @@ export async function teamScriptEnv(localConfig: LocalConfig): Promise<NodeJS.Pr
   const env: NodeJS.ProcessEnv = { ...process.env };
   // A git hook sets this for the pull. A team script must not look like one.
   delete env.TEAMAI_GIT_HOOK;
+  // A user-scope script must not inherit another checkout's identity.
+  delete env.TEAMAI_CHECKOUT;
+  delete env.TEAMAI_PROJECT;
+  delete env.TEAMAI_MAIN_CHECKOUT;
   env.TEAMAI_REPO = localConfig.repo.localPath;
   env.TEAMAI_SCOPE = localConfig.scope;
   if (localConfig.scope === 'project' && localConfig.projectRoot) {

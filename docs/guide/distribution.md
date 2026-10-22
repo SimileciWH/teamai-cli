@@ -145,6 +145,7 @@ scripts:
 - `postInit` runs after hooks are installed. Init waits, then syncs MCP, so a value the script collected takes effect. The same skip rule applies. `teamai script run postInit` runs it again and syncs MCP.
 - `prePull` runs at the start of a full pull, before that scope is synced. It cannot read the terminal. Pull waits up to 90 seconds, then leaves it running. An inline pull does not run it.
 - `postPull` runs after a full pull. A session start waits up to 90 seconds, then leaves it running. An interactive `teamai pull` does not wait. An inline pull does not run it. A failure is a line in `~/.teamai/debug.log`.
+  Set `scripts.postPull.required: true` for a setup check or local migration that must finish before setup succeeds. Interactive pull and onboarding then wait, display a bounded summary, and return failure if the script fails or remains pending. The script receives `TEAMAI_POSTPULL_REQUIRED=1`. Silent pulls keep output in diagnostics; inline pulls still skip scripts. Existing optional scripts keep their behavior.
 - `postDeploy` runs when a new linked worktree, or a submodule's first checkout, finishes the delivery that happens before that git command returns. That path does not run `teamai init`. Pull waits up to 15 seconds. Run the script again with `teamai script run postDeploy`. It should be safe to repeat, and it should leave an existing personal file alone.
 
 ## Roles and projects

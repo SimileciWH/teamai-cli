@@ -3324,6 +3324,24 @@ export async function pull(
   //    the clone, and reading it while the other process holds it on a
   //    transient branch is how a diagnostic invents a failure.
   await reportPostPullChecks(options, reported, contended.size > 0, gitContext);
+
+  // Required post-pull checks consume the clone under the same sync lock as
+  // resource delivery. The launch returns its own required flag, so another
+  // config read cannot reinterpret this script's result.
+  if (!options.dryRun && !options.inline && postPullRepo) {
+    const { outcome, required } = await runDeclaredPostPull(postPullRepo, {
+      interactive: options.interactive === true,
+      display: !options.silent,
+      localConfig: scriptOwner ?? undefined,
+    });
+    if (result) result.postPull = outcome;
+    if (required && outcome !== 'complete') {
+      syncResult.completed = false;
+      syncResult.delivery = 'failed';
+      process.exitCode = 1;
+      log.error(`Required post-pull checks are ${outcome}. Resource files may be synced, but setup is not complete. See ~/.teamai/debug.log.`);
+    }
+  }
   } finally {
     if (startupErrors.length > 0 || unwritten.length > 0 || contended.size > 0) syncResult.delivery = 'failed';
     if (pinRequired && !options.dryRun && syncResult.delivery !== 'complete') process.exitCode = 1;
@@ -3356,19 +3374,6 @@ export async function pull(
   //    Inline pulls otherwise skip team scripts. Nothing here can fail the pull.
   if (!options.dryRun && options.prepareCheckout && scriptOwner) {
     await runTeamScript(scriptOwner, 'postDeploy');
-  }
-
-  // 7. Team post-pull scripts (teamai.yaml `scripts.postPull`), for the
-  //    pull's deploy owner. Sync locks are usually released by now — a late
-  //    usage report (above) may still hold them; its writes go to the reports
-  //    worktree, not this clone's tree. Launch shape: post-pull.ts. Nothing
-  //    here can fail the pull.
-  if (!options.dryRun && !options.inline && postPullRepo) {
-    const outcome = await runDeclaredPostPull(postPullRepo, {
-      interactive: options.interactive === true,
-      localConfig: scriptOwner ?? undefined,
-    });
-    if (result) result.postPull = outcome;
   }
 }
 
