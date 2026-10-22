@@ -748,7 +748,7 @@ describe('init project scope (sandboxed)', () => {
     'teamai init <repo> --force — default project scope creates .teamai/',
     async () => {
       const os = await import('node:os');
-      // Nested project dir so cwd !== HOME (E1 would otherwise fall back to user)
+      // Nested project dir: init refuses to run in HOME without --scope
       const homeSandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-init-home-'));
       const sandbox = path.join(homeSandbox, 'project');
       fs.mkdirSync(sandbox);

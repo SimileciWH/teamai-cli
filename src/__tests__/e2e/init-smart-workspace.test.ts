@@ -70,12 +70,17 @@ function fixture(name: string, agents: string[], failingPostPull = false) {
     const result = spawnSync(process.execPath, [CLI, ...args], { cwd: project, env, encoding: 'utf8', timeout: 60_000 });
     return { code: result.status, output: `${result.stdout ?? ''}${result.stderr ?? ''}`, error: result.error };
   };
+  /** Run from another directory, for the $HOME scope refusal. */
+  const runIn = (cwd: string, ...args: string[]) => {
+    const result = spawnSync(process.execPath, [CLI, ...args], { cwd, env, encoding: 'utf8', timeout: 60_000 });
+    return { code: result.status, output: `${result.stdout ?? ''}${result.stderr ?? ''}`, error: result.error };
+  };
   const configFile = () => {
     const partitions = path.join(home, '.teamai/projects');
     if (!fs.existsSync(partitions)) return undefined;
     return fs.readdirSync(partitions).map(dir => path.join(partitions, dir, 'config.yaml')).find(file => fs.existsSync(file));
   };
-  return { project, home, repo, git, head, run, configFile };
+  return { project, home, repo, git, head, run, runIn, configFile };
 }
 
 describe.skipIf(process.platform === 'win32')('short workspace init with the built CLI', () => {
@@ -84,6 +89,61 @@ describe.skipIf(process.platform === 'win32')('short workspace init with the bui
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-short-init-'));
   });
   afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it('refuses the implicit default in HOME before authenticating, cloning or writing config', () => {
+    const f = fixture('implicit-at-home', ['codex']);
+    const result = f.runIn(f.home, 'init', TEAM);
+    expect(result.code, result.output).toBe(1);
+    expect(result.output).toContain('Refusing to install in your home directory without --scope');
+    expect(result.output).toMatch(/source checkout/);
+    expect(result.output).toMatch(/--scope user/);
+    // Nothing was bound: no auth, no clone, no config, no deliveries.
+    expect(result.output).not.toContain('Checking Git identity');
+    expect(result.output).not.toContain('Checking authentication');
+    expect(result.output).not.toContain('Team repo cloned');
+    expect(fs.existsSync(path.join(f.home, '.teamai/config.yaml'))).toBe(false);
+    expect(fs.existsSync(path.join(f.home, '.teamai/team-repo'))).toBe(false);
+    expect(fs.existsSync(path.join(f.home, '.codex/skills'))).toBe(false);
+    expect(f.configFile()).toBeUndefined();
+  }, 90_000);
+
+  it('refuses the implicit default when the working directory is a symlink to HOME', () => {
+    const f = fixture('symlink-at-home', ['codex']);
+    const linkedHome = path.join(path.dirname(f.home), 'linked-home');
+    fs.symlinkSync(f.home, linkedHome);
+    const result = f.runIn(linkedHome, 'init', TEAM);
+    expect(result.code, result.output).toBe(1);
+    expect(result.output).toContain('Refusing to install in your home directory without --scope');
+    expect(result.output).not.toContain('Team repo cloned');
+    expect(fs.existsSync(path.join(f.home, '.teamai/team-repo'))).toBe(false);
+    expect(f.configFile()).toBeUndefined();
+  }, 90_000);
+
+  it('still installs user scope in HOME when --scope user is explicit', () => {
+    const f = fixture('explicit-user-at-home', ['codex']);
+    const result = f.runIn(f.home, 'init', TEAM, '--scope', 'user', '--role', 'rd', '--agent', 'codex');
+    expect(result.code, result.output).toBe(0);
+    expect(result.output).toContain('Scope: user');
+    expect(result.output).not.toContain('Refusing to install in your home directory');
+    expect(fs.existsSync(path.join(f.home, '.teamai/config.yaml'))).toBe(true);
+    expect(fs.existsSync(path.join(f.home, '.teamai/team-repo'))).toBe(true);
+    const config = YAML.parse(fs.readFileSync(path.join(f.home, '.teamai/config.yaml'), 'utf8'));
+    expect(config.scope).toBe('user');
+    expect(config.enabledAgents).toEqual(['codex']);
+    // User scope keeps its own home layout instead of a workspace partition.
+    expect(fs.existsSync(path.join(f.home, '.teamai/projects'))).toBe(false);
+  }, 120_000);
+
+  it('keeps both workspace aliases working in an ordinary directory', () => {
+    for (const alias of ['workspace', 'project']) {
+      const f = fixture(`alias-${alias}`, ['codex']);
+      const result = f.run('init', TEAM, '--scope', alias);
+      expect(result.code, result.output).toBe(0);
+      expect(result.output).toContain('Scope: workspace');
+      const config = YAML.parse(fs.readFileSync(f.configFile()!, 'utf8'));
+      expect(config.scope).toBe('workspace');
+    }
+  }, 120_000);
 
   it('rejects a plain directory before cloning or writing any configuration', () => {
     const f = fixture('plain-directory', ['codex']);

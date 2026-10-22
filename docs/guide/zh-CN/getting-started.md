@@ -48,7 +48,7 @@
    cd /path/to/my-workspace
    teamai init https://github.com/your-org/your-repo
    ```
-   加上 `--scope user` 会装到用户主目录，这台机器上的每个项目都能看见。不加的话，文件只进当前项目。
+   加上 `--scope user` 会装到用户主目录，这台机器上的每个项目都能看见。不加的话，文件只进当前目录对应的 workspace，所以要在源码 checkout 里执行，不要在用户主目录里执行：在用户主目录下 init 会直接停止，并提示进入源码 checkout 或明确加 `--scope user`。
 2. 检查一下。
    ```bash
    teamai doctor

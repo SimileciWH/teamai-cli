@@ -433,7 +433,10 @@ async function resolveProjectsForInit(
  *
  * - Explicit `user` / `workspace` (or its older name `project`) → use as-is (`explicit: true`)
  * - Invalid value → throw
- * - Omitted → **workspace** (cwd), unless cwd === home (E1: fall back to user)
+ * - Omitted → **workspace** (cwd) only. In $HOME both the default and an
+ *   explicit workspace scope are refused instead of silently installing for
+ *   the user account: a member who meant the workspace must see why, and one
+ *   who meant user scope must say `--scope user`.
  *
  * Local install location is decided only by the CLI; remote `teamai.yaml.scope`
  * is ignored (see issue #250).
@@ -442,7 +445,7 @@ export function resolveInitScope(
   rawScope: string | undefined,
   cwd: string,
   homeDir: string,
-): { scope: Scope; projectRoot?: string; explicit: boolean; fallbackReason?: string } {
+): { scope: Scope; projectRoot?: string; explicit: boolean } {
   const cwdResolved = resolveRealPath(cwd);
   const homeResolved = resolveRealPath(homeDir);
   const atHome = cwdResolved === homeResolved;
@@ -452,7 +455,7 @@ export function resolveInitScope(
     if (scope === 'project' && atHome) {
       throw new Error(
         'Cannot use the workspace scope in your home directory (paths would collide with user scope). ' +
-        'cd to a workspace directory first, or omit --scope / use --scope user.',
+        'cd into your source checkout and run init there, or pass --scope user.',
       );
     }
     return {
@@ -462,15 +465,14 @@ export function resolveInitScope(
     };
   }
 
-  // Implicit default: project, with E1 fallback when cwd is $HOME
+  // Omitting --scope no longer picks user scope at $HOME: installing for the
+  // whole account has to be asked for (see the refusal above).
   if (atHome) {
-    return {
-      scope: 'user',
-      projectRoot: undefined,
-      explicit: false,
-      fallbackReason:
-        'cwd is your home directory; using user scope to avoid path collision with ~/.teamai',
-    };
+    throw new Error(
+      'Refusing to install in your home directory without --scope: the default is workspace scope, ' +
+      'whose paths would collide with user scope. ' +
+      'cd into your source checkout and run init there, or pass --scope user.',
+    );
   }
 
   return {
@@ -611,13 +613,12 @@ export async function initHttp(
 
   log.info('Initializing teamai (HTTP read-only consumer)...');
 
-  // Step 0: scope (same rules as git init — default project)
+  // Step 0: scope (same rules as git init — default workspace, user only on request)
   let scope: Scope;
   let projectRoot: string | undefined;
   let explicit: boolean;
-  let fallbackReason: string | undefined;
   try {
-    ({ scope, projectRoot, explicit, fallbackReason } = resolveInitScope(
+    ({ scope, projectRoot, explicit } = resolveInitScope(
       options.scope,
       process.cwd(),
       getUserHome(),
@@ -639,9 +640,6 @@ export async function initHttp(
     log.error((e as Error).message);
     process.exit(1);
     return;
-  }
-  if (fallbackReason) {
-    log.warn(fallbackReason);
   }
   const teamaiHome = scope === 'project' && projectRoot
     ? (existingLocalConfig?.dataHome ?? await resolveProjectDataHome(projectRoot))
@@ -1573,13 +1571,12 @@ export async function init(options: GlobalOptions & {
   }
   log.info('Initializing teamai...');
 
-  // Step 0: Resolve scope (default project; only explicit --scope user → ~/ )
+  // Step 0: Resolve scope (default workspace; only an explicit --scope user → ~/ )
   let scope: Scope;
   let projectRoot: string | undefined;
   let explicit: boolean;
-  let fallbackReason: string | undefined;
   try {
-    ({ scope, projectRoot, explicit, fallbackReason } = resolveInitScope(
+    ({ scope, projectRoot, explicit } = resolveInitScope(
       options.scope,
       process.cwd(),
       getUserHome(),
@@ -1623,9 +1620,6 @@ export async function init(options: GlobalOptions & {
     log.error((e as Error).message);
     process.exit(1);
     return;
-  }
-  if (fallbackReason) {
-    log.warn(fallbackReason);
   }
   printScopeSummary(scope, projectRoot, explicit);
 

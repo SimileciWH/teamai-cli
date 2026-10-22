@@ -48,7 +48,7 @@ You need the repo URL.
    cd /path/to/my-workspace
    teamai init https://github.com/your-org/your-repo
    ```
-   Add `--scope user` to install into your home directory. Every project on this machine then sees the files. Without that flag, files install into this project.
+   Add `--scope user` to install into your home directory. Every project on this machine then sees the files. Without that flag, files install into this project — so run the command inside a source checkout, not in your home directory: there, init stops before doing anything and asks you to enter a checkout or pass `--scope user`.
 2. Check it.
    ```bash
    teamai doctor

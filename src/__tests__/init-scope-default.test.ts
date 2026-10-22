@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { resolveInheritUserScope, resolveInitScope, resolveInitRepo } from '../init.js';
 
 describe('resolveInitScope', () => {
@@ -45,21 +48,46 @@ describe('resolveInitScope', () => {
     expect(() => resolveInitScope('global', cwd, home)).toThrow('Invalid scope "global". Use "workspace" or "user".');
   });
 
-  it('falls back to user when cwd === home and scope is implicit (E1)', () => {
-    const result = resolveInitScope(undefined, home, home);
-    expect(result.scope).toBe('user');
-    expect(result.projectRoot).toBeUndefined();
-    expect(result.explicit).toBe(false);
-    expect(result.fallbackReason).toMatch(/home directory/);
+  it('refuses the implicit default in the home directory instead of installing for the user account', () => {
+    expect(() => resolveInitScope(undefined, home, home)).toThrow(
+      'Refusing to install in your home directory without --scope',
+    );
+  });
+
+  it('names both ways out when refusing at home: a source checkout, or --scope user', () => {
+    let message = '';
+    try {
+      resolveInitScope(undefined, home, home);
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/source checkout/);
+    expect(message).toMatch(/--scope user/);
   });
 
   it('treats symlink-equivalent cwd/home as the same path (macOS /var vs /private/var)', () => {
-    // Use the real process HOME/tmpdir pair when they resolve to the same inode
-    // via realpath; otherwise simulate with identical logical paths.
-    const result = resolveInitScope(undefined, '/tmp', '/tmp');
     // /tmp may realpath to /private/tmp on macOS — both args go through realpath
-    expect(result.scope).toBe('user');
-    expect(result.fallbackReason).toMatch(/home directory/);
+    expect(() => resolveInitScope(undefined, '/tmp', '/tmp')).toThrow(
+      'Refusing to install in your home directory without --scope',
+    );
+  });
+
+  it('refuses the implicit default through a symlink that points at home', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-init-scope-home-'));
+    try {
+      const realHome = path.join(root, 'home');
+      const linkedHome = path.join(root, 'linked-home');
+      fs.mkdirSync(realHome, { recursive: true });
+      fs.symlinkSync(realHome, linkedHome, process.platform === 'win32' ? 'junction' : 'dir');
+      expect(() => resolveInitScope(undefined, linkedHome, realHome)).toThrow(
+        'Refusing to install in your home directory without --scope',
+      );
+      expect(() => resolveInitScope(undefined, realHome, linkedHome)).toThrow(
+        'Refusing to install in your home directory without --scope',
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it.each(['workspace', 'project'])('throws when --scope %s is explicit and cwd === home (E1)', (scope) => {

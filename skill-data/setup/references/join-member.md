@@ -30,10 +30,12 @@ teamai --version
 
 If it fails, Node.js ≥ 20 is missing — have them install Node 20+ first.
 
-## Step 2 — Choose scope (ASK)
+## Step 2 — Use project scope by default
 
-- **This project only** (default): `cd` into the project directory first.
-- **Whole machine**: add `--scope user`.
+- **This project only** (default): `cd` into the project directory first. Do
+  not run it in the user's home directory: without `--scope` init refuses
+  there, before authenticating or cloning.
+- **User account** (only when requested): add `--scope user`.
 - **A folder holding several repos** (a workspace): set up each repo from
   inside it, then run the same `init` in the folder. The folder also receives
   what each repo inside selects; pass `--project` there only for a project the

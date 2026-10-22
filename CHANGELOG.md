@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file. See [standa
 
 ### Changed
 
+- `teamai init` without `--scope` only ever installs workspace scope. Run in the home directory (or a path that resolves to it), it now stops before authentication, cloning or any config write and says to run it in a source checkout or pass `--scope user`, instead of silently installing for the whole account. An explicit `--scope user` still works in the home directory and anywhere else; the `workspace` / `project` aliases, the not-a-Git-checkout refusal and HTTP init in an ordinary directory are unchanged.
 - `teamai init` no longer pulls team skills, rules, agents or MCP before it exits. It still saves config and installs hooks. In project scope it creates a tool directory only for a tool named with `--agent` or picked in a terminal; otherwise that directory appears when the tool starts a session, and that session start pulls. `teamai pull` still does not create a missing tool directory. A tool that reads rules and MCP once, before its SessionStart hook, sees them from the following session (for [#1065](https://github.com/Tencent/teamai-cli/issues/1065)).
 
 ### 💥 Breaking Changes
