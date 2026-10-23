@@ -80,7 +80,7 @@ function fixture(name: string, agents: string[], failingPostPull = false, requir
     if (!fs.existsSync(partitions)) return undefined;
     return fs.readdirSync(partitions).map(dir => path.join(partitions, dir, 'config.yaml')).find(file => fs.existsSync(file));
   };
-  return { project, home, repo, git, head, run, runIn, configFile };
+  return { project, home, repo, bin, env, git, head, run, runIn, configFile };
 }
 
 describe.skipIf(process.platform === 'win32')('short workspace init with the built CLI', () => {
@@ -89,6 +89,58 @@ describe.skipIf(process.platform === 'win32')('short workspace init with the bui
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-short-init-'));
   });
   afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it('resolves an SSH alias on a debug branch and a fresh linked worktree', () => {
+    for (const linked of [false, true]) {
+      const f = fixture(`ssh-alias-${linked}`, ['codex']);
+      delete f.env.GIT_SSH_COMMAND;
+      fs.writeFileSync(path.join(f.bin, 'ssh'), '#!/bin/sh\ncase "$*" in\n  *git-upload-pack*) exec git-upload-pack "$TEAMAI_TEST_REPO" ;;\n  *) printf "hostname source-fixture.invalid\\nport 29418\\n" ;;\nesac\n', { mode: 0o755 });
+      f.git(f.project, 'remote', 'set-url', 'origin', 'ssh://rd@local-alias/firmware/a');
+      let target = f.project;
+      if (linked) {
+        target = path.join(path.dirname(f.project), 'linked-debug');
+        f.git(f.project, 'worktree', 'add', '-b', 'debug/linked', target);
+      } else {
+        f.git(f.project, 'checkout', '-b', 'debug/rd-issue');
+      }
+      const result = f.runIn(target, 'init', TEAM);
+      expect(result.code, result.output).toBe(0);
+      expect(result.output).toContain('Project: fw-a');
+      expect(result.output).toContain('Resource sync: complete');
+    }
+  }, 120_000);
+
+  it('rejects resolved port mismatches and ambiguous projects without saving a binding', () => {
+    for (const ambiguous of [false, true]) {
+      const f = fixture(`ssh-reject-${ambiguous}`, ['codex']);
+      delete f.env.GIT_SSH_COMMAND;
+      const port = ambiguous ? 29418 : 29419;
+      fs.writeFileSync(path.join(f.bin, 'ssh'), `#!/bin/sh\ncase "$*" in\n  *git-upload-pack*) exec git-upload-pack "$TEAMAI_TEST_REPO" ;;\n  *) printf "hostname source-fixture.invalid\\nport ${port}\\n" ;;\nesac\n`, { mode: 0o755 });
+      f.git(f.project, 'remote', 'set-url', 'origin', 'ssh://local-alias/firmware/a');
+      if (ambiguous) {
+        const manifestPath = path.join(f.repo, 'manifest/projects.yaml');
+        const manifest = YAML.parse(fs.readFileSync(manifestPath, 'utf8'));
+        manifest.projects[1].repositories = [SOURCE];
+        fs.writeFileSync(manifestPath, YAML.stringify(manifest));
+        f.git(f.repo, 'add', '.'); f.git(f.repo, 'commit', '-m', 'Ambiguous fixture');
+      }
+      const result = f.run('init', TEAM);
+      expect(result.code, result.output).toBe(1);
+      expect(result.output).toContain(ambiguous ? 'matches several' : 'does not match');
+      expect(result.output).toContain('SSH resolved remotes:');
+      expect(f.configFile()).toBeUndefined();
+    }
+  }, 90_000);
+
+  it('does not guess aliases when Git uses a custom SSH transport', () => {
+    const f = fixture('custom-ssh-alias', ['codex']);
+    f.git(f.project, 'remote', 'set-url', 'origin', 'ssh://local-alias/firmware/a');
+    const result = f.run('init', TEAM);
+    expect(result.code, result.output).toBe(1);
+    expect(result.output).toContain('custom Git SSH command');
+    expect(result.output).toContain('Branch names do not affect');
+    expect(f.configFile()).toBeUndefined();
+  }, 90_000);
 
   it('fails both init and interactive pull when a required migration fails', () => {
     const f = fixture('required-post-fail', ['claude'], true, true);

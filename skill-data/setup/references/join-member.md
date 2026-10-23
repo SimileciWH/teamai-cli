@@ -83,6 +83,7 @@ the source checkout. Workspace init selects the team's default role, matches
 source remotes to `manifest/projects.yaml` `repositories`, detects installed
 OpenCode/Pi/Codex/Kimi/Claude CLIs, skips missing ones, and performs the initial
 sync. Relay its final summary; do not ask the member to repeat these choices.
+When direct matching fails, SSH remotes are resolved through local `ssh -G` configuration (hostname and port); branch names are irrelevant. Explicit URL user/port take precedence. This does not connect to the server, but local SSH `Match exec` rules may run. Custom Git SSH commands disable this fallback; use a registered remote or `--project` instead.
 No match or an ambiguous match requires the maintainer to fix the mapping (or
 an explicit project choice); never guess from the folder name. Other teams and
 user-scope installs keep the picker flow below.

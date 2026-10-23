@@ -282,3 +282,9 @@ reviewers:
 ## 新增 Provider
 
 Provider 层的内部实现和新增 provider 的步骤见 [Adding a Git provider](../../dev/adding-a-provider.md)。
+
+### 工作区初始化时识别 SSH 别名
+
+短命令 `init` 先将源码 remote 与项目登记表匹配。没有匹配时，通过本机 `ssh -G` 将 SSH 别名解析为主机名和端口，再次匹配，不修改 Git remote。支持 SSH URL 和 SCP 格式；URL 显式指定的用户名和端口优先。debug 分支和 linked worktree 使用相同规则；不同主机、端口和仓库路径仍分别匹配，多项目冲突会拒绝绑定。
+
+每个 `ssh -G` 子进程的超时为 3 秒，不连接服务器，但本机 SSH 配置的 `Match exec` 规则可能执行。可执行文件从源码目录外的绝对 PATH 路径查找；该阶段的文件系统访问超时由操作系统控制，不可达的网络 PATH 目录可能延迟初始化。设置了 `GIT_SSH`、`GIT_SSH_COMMAND` 或 `core.sshCommand` 时跳过解析，避免误用自定义 SSH 的配置。匹配失败时显示源码地址和解析结果，可用 `--project <id>` 或登记实际 remote。已有绑定及持久化仓库身份不变。

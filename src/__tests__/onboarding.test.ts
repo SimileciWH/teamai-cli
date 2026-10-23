@@ -1,5 +1,9 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { detectOnboardingAgents, matchOnboardingProject, matchesInitBinding, ONBOARDING_AGENTS } from '../onboarding.js';
+import { detectOnboardingAgents, matchOnboardingProject, matchesInitBinding, ONBOARDING_AGENTS, hasCustomSshTransport } from '../onboarding.js';
 import { validateProjectsManifest } from '../projects.js';
 import { TeamaiConfigSchema } from '../types.js';
 
@@ -12,6 +16,17 @@ const manifest = validateProjectsManifest({
 });
 
 describe('short workspace onboarding', () => {
+  it('preserves empty SSH overrides instead of silently using the default transport', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-ssh-override-'));
+    try {
+      execFileSync('git', ['init', root]);
+      expect(await hasCustomSshTransport(root, {})).toBe(false);
+      expect(await hasCustomSshTransport(root, { GIT_SSH_COMMAND: '' })).toBe(true);
+      expect(await hasCustomSshTransport(root, { GIT_SSH: '' })).toBe(true);
+      execFileSync('git', ['-C', root, 'config', 'core.sshCommand', '']);
+      expect(await hasCustomSshTransport(root, {})).toBe(true);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
   it('recognizes provider-supported SSH, HTTPS and short aliases on repeated init', () => {
     for (const input of ['git@github.com:acme/team.git', 'https://github.com/acme/team', 'acme/team']) {
       expect(matchesInitBinding('https://github.com/acme/team.git', input, 'github')).toBe(true);

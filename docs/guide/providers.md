@@ -279,3 +279,9 @@ reviewers:
 ## Adding a provider
 
 Provider internals and the steps for adding a new one are in [Adding a Git provider](../dev/adding-a-provider.md).
+
+### SSH aliases during workspace init
+
+Short workspace `init` first matches source remotes against the project manifest. If none match, it uses local `ssh -G` to resolve SSH aliases to hostname and port, then matches again without changing the Git remote. SSH URLs and SCP-style remotes are supported; explicit URL user/port take precedence. Debug branches and linked worktrees use the same matching rules. Different hosts, ports and repository paths remain distinct; ambiguous projects are rejected.
+
+Each `ssh -G` subprocess has a three-second timeout and does not connect to the server, although local SSH `Match exec` rules may execute. Executable discovery uses absolute PATH entries outside the source checkout; filesystem access during discovery follows the operating system’s timeout, so an unavailable network PATH directory can delay initialization. Custom `GIT_SSH`, `GIT_SSH_COMMAND` or `core.sshCommand` transports disable the fallback because their configuration may differ. Failed matching reports the source and resolved remotes; use `--project <id>` or register the actual remote if needed. Existing bindings and persistent repository identities are unchanged.
